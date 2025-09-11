@@ -16,6 +16,7 @@ export default function Dashboard() {
   const [query, setQuery] = useState('');
   const [showEnabledOnly, setShowEnabledOnly] = useState(false);
   const [mode, setMode] = useState('single'); // 'single' | 'batch'
+  const [sidebarOpen, setSidebarOpen] = useState(true); // collapsible list panel
 
   useEffect(() => { load(); }, []);
   const load = async () => { const data = await fetchTestcases(); setItems(data); };
@@ -193,6 +194,15 @@ export default function Dashboard() {
     <div className="p-6 min-h-screen bg-gray-50">
       {/* Header */}
       <div className="flex items-center gap-3">
+        <button
+          className={`icon-btn ${sidebarOpen ? 'icon-primary' : 'icon-muted'}`}
+          onClick={() => setSidebarOpen(v => !v)}
+          title={sidebarOpen ? 'Hide test list' : 'Show test list'}
+          aria-label="Toggle test list"
+          aria-expanded={sidebarOpen}
+        >
+          <span className="mi">{sidebarOpen ? 'menu_open' : 'menu'}</span>
+        </button>
         <div>
           <h1 className="text-2xl font-bold">Test Cases</h1>
           <p className="text-sm text-gray-500">Create, import, export, and order your test cases</p>
@@ -239,6 +249,7 @@ export default function Dashboard() {
       {/* Content */}
       <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* List column */}
+        {sidebarOpen && (
         <div className="md:col-span-1">
           {/* Bulk bar */}
           <div className="flex items-center gap-2 mb-2">
@@ -292,9 +303,10 @@ export default function Dashboard() {
             })}
           </div>
         </div>
+        )}
 
         {/* Editor column */}
-        <div className="md:col-span-2">
+        <div className={sidebarOpen ? "md:col-span-2" : "md:col-span-3"}>
           <div className="bg-white border rounded p-4">
             {mode === 'single' ? (
               <>
