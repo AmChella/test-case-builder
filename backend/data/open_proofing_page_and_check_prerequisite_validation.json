@@ -1,0 +1,76 @@
+{
+  "description": "Open Proofing Page and check Prerequisite validation",
+  "enabled": true,
+  "testSteps": [
+    {
+      "stepName": "Navigate to Proofing page",
+      "action": "goto",
+      "path": "/article/${TOKEN}"
+    },
+    {
+      "stepName": "Page Load and Element Visibility Check",
+      "action": "waitForTimeout",
+      "waitTime": 5000,
+      "validations": [
+        {
+          "type": "toHaveTitle",
+          "data": "NeoPrc",
+          "soft": true,
+          "message": "Title should be 'NeoPrc'"
+        },
+        {
+          "type": "toBeVisible",
+          "selector": ".test_submitBtn",
+          "message": "Submit Proof button should be visible",
+          "soft": true
+        },
+        {
+          "type": "toHaveText",
+          "selector": "button.test_submitBtn",
+          "data": "Submit Proof",
+          "soft": true,
+          "message": "Proofing Page should have 'Submit Proof' as a button text"
+        },
+        {
+          "type": "toBeVisible",
+          "selector": ".space-x-3>button:nth-child(1)",
+          "message": "Accept Cookies button should be visible",
+          "soft": true
+        },
+        {
+          "type": "toBeVisible",
+          "selector": ".space-x-3>button:nth-child(2)",
+          "message": "Reject Non-Essential button should be visible",
+          "soft": true
+        },
+        {
+          "type": "toBeVisible",
+          "selector": ".space-x-3>button:nth-child(3)",
+          "message": "Choose Preferences button should be visible",
+          "soft": true
+        },
+        {
+          "type": "toHaveText",
+          "selector": ".space-x-3>button:nth-child(1)",
+          "data": "Choose Preferences",
+          "soft": true,
+          "message": "Choose Preferences button should have correct text"
+        },
+        {
+          "type": "toHaveText",
+          "selector": ".space-x-3>button:nth-child(2)",
+          "data": "Reject Non-Essential",
+          "soft": true,
+          "message": "Reject Non-Essential button should have correct text"
+        },
+        {
+          "type": "toHaveText",
+          "selector": ".space-x-3>button:nth-child(3)",
+          "data": "Accept All Cookies",
+          "message": "Accept All Cookies button should have correct text"
+        }
+      ]
+    }
+  ],
+  "testOrder": 1
+}

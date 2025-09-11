@@ -1,0 +1,92 @@
+{
+    "description": "Accept Cookie Scenario and onboarding",
+    "testOrder": 2,
+    "enabled": true,
+    "testSteps": [
+        {
+            "stepName": "Navigate to Proofing page",
+            "action": "goto",
+            "path": "/article/${TOKEN}"
+        },
+        {
+            "stepName": "Accepting All Cookies",
+            "action": "click",
+            "selector": ".space-x-3>button:nth-child(3)",
+            "soft": true,
+            "validations": [
+                {
+                    "type": "toBeHidden",
+                    "selector": ".space-x-3>button:nth-child(3)",
+                    "message": "Accept Cookies button should be hidden after accepting cookies",
+                    "soft": true
+                },
+                {
+                    "type": "toBeHidden",
+                    "selector": ".space-x-3>button:nth-child(2)",
+                    "message": "Reject Non-Essential button should be hidden after accepting cookies",
+                    "soft": true
+                },
+                {
+                    "type": "toBeHidden",
+                    "selector": ".space-x-3>button:nth-child(1)",
+                    "message": "Choose Preferences button should be hidden after accepting cookies",
+                    "soft": true
+                },
+                {
+                    "type": "toBeVisible",
+                    "selector": ".ReactModal__Overlay",
+                    "message": "Tutorial Modal should be visible after accepting cookies",
+                    "soft": true
+                },
+                {
+                    "type": "toHaveText",
+                    "selector": "h2.text-lg",
+                    "data": "Address queries",
+                    "soft": true,
+                    "message": "widget should have 'Address queries' as content"
+                }
+            ]
+        },
+        {
+            "stepName": "Navigate tutorial Address Queries widget",
+            "action": "click",
+            "selector": ".pr-1",
+            "validations": [
+                {
+                    "type": "toHaveText",
+                    "selector": "h2.text-lg",
+                    "data": "Apply corrections",
+                    "soft": true,
+                    "message": "widget should have 'Apply corrections' as content"
+                }
+            ]
+        },
+        {
+            "stepName": "Navigate tutorial Apply corrections widget",
+            "action": "click",
+            "selector": ".pr-1",
+            "validations": [
+                {
+                    "type": "toHaveText",
+                    "selector": "h2.text-lg",
+                    "data": "Preview and submit your proof",
+                    "soft": true,
+                    "message": "widget should have 'Preview and submit your proof' as content"
+                }
+            ]
+        },
+        {
+            "stepName": "Navigate tutorial Preview and submit your proof widget",
+            "action": "click",
+            "selector": "button.text-white:nth-child(2)",
+            "validations": [
+                {
+                    "type": "toBeHidden",
+                    "selector": ".ReactModal__Overlay",
+                    "soft": true,
+                    "message": "widget should be hidden"
+                }
+            ]
+        }
+    ]
+}
