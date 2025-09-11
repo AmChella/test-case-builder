@@ -1,0 +1,16 @@
+{
+  "name": "ui-testcase-tool-backend",
+  "private": true,
+  "version": "0.1.0",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "body-parser": "^1.20.3",
+    "express": "^4.21.1"
+  }
+}
