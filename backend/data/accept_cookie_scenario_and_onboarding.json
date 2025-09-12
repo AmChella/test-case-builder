@@ -6,7 +6,8 @@
     {
       "stepName": "Navigate to Proofing page",
       "action": "goto",
-      "path": "/article/${TOKEN}"
+      "path": "/article/xha5h3z4af4tuf2",
+      "selector": "/article/xha5h3z4af4tuf2"
     },
     {
       "stepName": "Accepting All Cookies",

@@ -101,3 +101,21 @@ h4, h5 { font-weight: 500; color: #1f2937; }
 .toggle-btn:focus { outline: 2px solid rgba(59,130,246,0.6); outline-offset: 2px; }
 .toggle-on { color: #16a34a; }
 .toggle-off { color: #6b7280; }
+
+/* Spinner (CSS loader) */
+@keyframes spin {
+	to { transform: rotate(360deg); }
+}
+.spinner {
+	display: inline-block;
+	width: 16px;
+	height: 16px;
+	border: 2px solid rgba(255,255,255,0.5); /* visible on colored buttons */
+	border-top-color: #ffffff;
+	border-radius: 50%;
+	animation: spin 0.8s linear infinite;
+}
+.spinner-dark {
+	border-color: #d1d5db; /* gray-300 */
+	border-top-color: #111827; /* gray-900 */
+}

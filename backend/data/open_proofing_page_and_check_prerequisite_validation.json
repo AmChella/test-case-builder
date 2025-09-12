@@ -1,11 +1,13 @@
 {
+  "filename": "open_proofing_page_and_check_prerequisite_validation.json",
   "description": "Open Proofing Page and check Prerequisite validation",
   "enabled": true,
   "testSteps": [
     {
       "stepName": "Navigate to Proofing page",
       "action": "goto",
-      "path": "/article/${TOKEN}"
+      "path": "/article/xha5h3z4af4tuf2",
+      "selector": "/article/xha5h3z4af4tuf2"
     },
     {
       "stepName": "Page Load and Element Visibility Check",
@@ -16,7 +18,8 @@
           "type": "toHaveTitle",
           "data": "NeoPrc",
           "soft": true,
-          "message": "Title should be 'NeoPrc'"
+          "message": "Title should be 'NeoPrc'",
+          "selector": "title"
         },
         {
           "type": "toBeVisible",
