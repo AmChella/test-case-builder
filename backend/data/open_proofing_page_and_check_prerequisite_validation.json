@@ -4,7 +4,7 @@
   "enabled": true,
   "testSteps": [
     {
-      "stepName": "Navigate to Proofing page",
+      "stepName": "Navigate to Proofing Page",
       "action": "goto",
       "path": "/article/xha5h3z4af4tuf2",
       "selector": "/article/xha5h3z4af4tuf2"
