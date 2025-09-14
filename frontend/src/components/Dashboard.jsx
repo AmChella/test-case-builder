@@ -3,6 +3,7 @@ import { fetchTestcases, deleteTestcase, createTestcases, updateTestcase, runTes
 import TestCaseForm from './TestCaseForm';
 import BatchCreate from './BatchCreate';
 import { useToast } from './ToastProvider';
+import { useLogger } from './LoggerProvider';
 
 export default function Dashboard() {
   const [items, setItems] = useState([]);
@@ -13,6 +14,7 @@ export default function Dashboard() {
   const [isOverDropzone, setIsOverDropzone] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
   const toast = useToast();
+  const logger = useLogger();
   const [query, setQuery] = useState('');
   const [showEnabledOnly, setShowEnabledOnly] = useState(false);
   const [mode, setMode] = useState('single'); // 'single' | 'batch'
@@ -58,6 +60,7 @@ export default function Dashboard() {
     a.download = 'test-cases.json';
     a.click();
     URL.revokeObjectURL(url);
+    logger.info('Export all', { count: items.length });
   };
 
   const exportOne = (it) => {
@@ -69,6 +72,7 @@ export default function Dashboard() {
     a.download = filename || 'testcase.json';
     a.click();
     URL.revokeObjectURL(url);
+    logger.info('Export one', { filename: it.filename });
   };
 
   // Open a test case in editor; if currently in batch mode, switch to single and notify
@@ -91,9 +95,11 @@ export default function Dashboard() {
   await createTestcases(json);
   await load();
   toast.success('Imported test case(s) successfully');
+      logger.info('Import from file input', { count: Array.isArray(json) ? json.length : 1, name: file.name });
     } catch (err) {
       console.error(err);
   toast.error('Import failed — ' + (err?.response?.data?.error || err.message));
+      logger.error('Import failed (file input)', { error: err?.response?.data?.error || err.message });
     } finally {
       e.target.value = '';
     }
@@ -114,9 +120,11 @@ export default function Dashboard() {
   await createTestcases(payload);
   await load();
   toast.success('Imported test case(s) successfully');
+      logger.info('Import via drop', { files: files.map(f => f.name), count: payload.length });
     } catch (err) {
       console.error(err);
   toast.error('Import failed — ' + (err?.response?.data?.error || err.message));
+      logger.error('Import failed (drop)', { error: err?.response?.data?.error || err.message });
     }
   };
 
@@ -139,6 +147,7 @@ export default function Dashboard() {
     clearSelection();
   await load();
   toast.success('Deleted selected test case(s)');
+    logger.info('Deleted selected', { count: selected.size });
   };
 
   // Duplicate actions
@@ -147,6 +156,7 @@ export default function Dashboard() {
   await createTestcases({ ...content });
   await load();
   toast.success('Duplicated test case');
+    logger.info('Duplicated one', { source: filename });
   };
   const duplicateSelected = async () => {
     const toDup = items.filter(i => selected.has(i.filename)).map(({ filename, ...content }) => content);
@@ -155,6 +165,7 @@ export default function Dashboard() {
     clearSelection();
   await load();
   toast.success('Duplicated selected test case(s)');
+    logger.info('Duplicated selected', { count: toDup.length });
   };
 
   // Drag-and-drop reordering within list
@@ -179,9 +190,11 @@ export default function Dashboard() {
       setSavingOrder(true);
       const changed = reassigned.filter(it => prevOrderByFile.get(it.filename) !== it.testOrder);
       await Promise.all(changed.map(it => updateTestcase(it.filename, { description: it.description, enabled: it.enabled, testSteps: it.testSteps, testOrder: it.testOrder })));
+      logger.info('Reorder saved', { changed: changed.length });
     } catch (err) {
       console.error(err);
   toast.error('Failed to save order — ' + (err?.response?.data?.error || err.message));
+      logger.error('Reorder save failed', { error: err?.response?.data?.error || err.message });
       await load();
     } finally {
       setSavingOrder(false);
@@ -201,9 +214,11 @@ export default function Dashboard() {
       setSavingOrder(true);
       const changed = reassigned.filter(it => prevOrderByFile.get(it.filename) !== it.testOrder);
       await Promise.all(changed.map(it => updateTestcase(it.filename, { description: it.description, enabled: it.enabled, testSteps: it.testSteps, testOrder: it.testOrder })));
+      logger.info('Move saved', { changed: changed.length });
     } catch (err) {
       console.error(err);
   toast.error('Failed to save order — ' + (err?.response?.data?.error || err.message));
+      logger.error('Move save failed', { error: err?.response?.data?.error || err.message });
       await load();
     } finally {
       setSavingOrder(false);
@@ -211,7 +226,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="p-6 min-h-screen bg-gray-50">
+  <div className="p-6 min-h-screen">
       {/* Header */}
       <div className="flex items-center gap-3">
         <div>
@@ -319,6 +334,7 @@ export default function Dashboard() {
                             setRunResult(null);
                             setRunning(it.filename);
                             toast.info(`Running: ${it.description || it.filename}`);
+                            logger.info('Run started', { filename: it.filename, description: it.description });
                             try {
                               const { filename, ...scenario } = it;
                               const res = await runTest({ scenarios: [scenario], headless: true });
@@ -345,7 +361,13 @@ export default function Dashboard() {
                                   endTime: typeof s.endTime === 'string' ? Date.parse(s.endTime) : s.endTime,
                                 }));
                                 setRunResult({ ok: allPassed, for: it.filename, ...report, startTime, endTime, steps });
-                                if (allPassed) toast.success('Test run finished successfully'); else toast.error('Test run failed — see error panel');
+                                if (allPassed) {
+                                  toast.success('Test run finished successfully');
+                                  logger.info('Run succeeded', { filename: it.filename, steps: steps.length, passed: steps.filter(s => s.status === 'passed').length, durationMs: (endTime && startTime) ? (endTime - startTime) : undefined });
+                                } else {
+                                  toast.error('Test run failed — see error panel');
+                                  logger.warn('Run failed', { filename: it.filename, steps: steps.length, failed: steps.filter(s => s.status !== 'passed').length, status: report.status });
+                                }
                               } else {
                                 // Fallback to CLI-like output
                                 const code = report?.code ?? res?.code;
@@ -353,14 +375,22 @@ export default function Dashboard() {
                                 const stderr = report?.stderr ?? res?.stderr ?? report?.error ?? res?.error ?? '';
                                 const ok = code !== undefined ? Number(code) === 0 : false;
                                 setRunResult({ ok, code, stdout, stderr, for: it.filename });
-                                if (ok) toast.success('Test run finished successfully'); else toast.error('Test run failed — see error panel');
+                                if (ok) {
+                                  toast.success('Test run finished successfully');
+                                  logger.info('Run succeeded (CLI mode)', { filename: it.filename, code, stdoutLen: String(stdout || '').length, stderrLen: String(stderr || '').length });
+                                } else {
+                                  toast.error('Test run failed — see error panel');
+                                  logger.warn('Run failed (CLI mode)', { filename: it.filename, code, stderrSnippet: String(stderr || '').slice(0, 200) });
+                                }
                               }
                             } catch (err) {
                               const msg = err?.response?.data?.error || err.message || 'Unknown error';
                               setRunResult({ ok: false, code: undefined, stdout: '', stderr: msg, for: it.filename });
                               toast.error('Test run failed — see error panel');
+                              logger.error('Run error', { filename: it.filename, error: msg });
                             } finally {
                               setRunning(null);
+                              logger.debug('Run finished', { filename: it.filename });
                             }
                           }}
                         >
@@ -374,7 +404,7 @@ export default function Dashboard() {
                       <button className="icon-btn icon-muted" title="Edit" aria-label="Edit" onClick={(e) => { e.stopPropagation(); openForEdit(it); }}><span className="mi">edit</span></button>
                       <button className="icon-btn icon-success" title="Export" aria-label="Export" onClick={(e) => { e.stopPropagation(); exportOne(it); }}><span className="mi">download</span></button>
                       <button className="icon-btn icon-primary" title="Duplicate" aria-label="Duplicate" onClick={(e) => { e.stopPropagation(); duplicateOne(it); }}><span className="mi">content_copy</span></button>
-                      <button className="icon-btn icon-danger" title="Delete" aria-label="Delete" onClick={(e) => { e.stopPropagation(); deleteTestcase(it.filename).then(load).then(() => toast.success('Deleted')); }}><span className="mi">delete</span></button>
+                      <button className="icon-btn icon-danger" title="Delete" aria-label="Delete" onClick={async (e) => { e.stopPropagation(); try { await deleteTestcase(it.filename); await load(); toast.success('Deleted'); logger.info('Deleted one', { filename: it.filename }); } catch (err) { toast.error('Delete failed — ' + (err?.response?.data?.error || err.message)); logger.error('Delete failed', { filename: it.filename, error: err?.response?.data?.error || err.message }); } }}><span className="mi">delete</span></button>
                     </div>
                   </div>
                   <span className="icon-btn icon-muted cursor-grab select-none" title="Drag to reorder" aria-label="Drag handle"><span className="mi">drag_indicator</span></span>

@@ -1,13 +1,19 @@
-const { expect } = require("@playwright/test");
-const { customLogicMap } = require("./custom-logic");
-const { TestStep, ValidationStep } = require("./data-loader");
+import { expect, Page, Locator } from "@playwright/test";
+import { customLogicMap, customValidationMap } from "./custom-logic";
+import type { TestStep, ValidationStep } from "./data-loader";
+import { logger } from "./logger";
 
-class ActionExecutor {
-  constructor(page) {
+export class ActionExecutor {
+  private page: Page;
+
+  constructor(page: Page) {
     this.page = page;
   }
 
-  getLocator(selector, selectorType = "css") {
+  getLocator(
+    selector: string,
+    selectorType: "css" | "xpath" | "id" | "text" | "testId" = "css"
+  ): Locator {
     switch (selectorType) {
       case "css":
         return this.page.locator(selector);
@@ -27,14 +33,18 @@ class ActionExecutor {
   /**
    * Executes a test step, supporting configurable actions, iteration, and custom logic.
    */
-  async executeStep(step, context = {}) {
-    let locator;
+  async executeStep(step: TestStep, context: Record<string, any> = {}) {
+    let locator: Locator | undefined;
     if (step.selector) {
       locator = this.getLocator(step.selector, step.selectorType);
+      if (typeof step.nth === "number" && step.nth >= 0) {
+        locator = locator.nth(step.nth);
+      }
     }
 
     // Support iteration if step.iterate is true and locator resolves to multiple elements
-    if (step.iterate && locator) {
+    // @ts-ignore allow iterate optional custom flag from JSON
+    if ((step as any).iterate && locator) {
       const count = await locator.count();
       for (let i = 0; i < count; i++) {
         const nthLocator = locator.nth(i);
@@ -50,7 +60,7 @@ class ActionExecutor {
 
     if (step.validations) {
       for (const validation of step.validations) {
-        await this.executeValidation(validation);
+        await this.executeValidation(validation, { locator, context });
       }
     }
   }
@@ -58,82 +68,189 @@ class ActionExecutor {
   /**
    * Internal: Executes a single action on a locator or the page.
    */
-  async _executeAction(step, locator, context) {
+  async _executeAction(
+    step: TestStep,
+    locator?: Locator,
+    context: Record<string, any> = {}
+  ) {
     switch (step.action) {
       case "goto":
-        await this.page.goto(step.path);
+        await this.page.goto(
+          String(step.path ?? "/"),
+          step.actionOptions as any
+        );
         break;
+      case "upload": {
+        if (!locator)
+          throw new Error(
+            "upload requires a selector pointing to an <input type='file'> element"
+          );
+        // Two ways to provide files:
+        // 1) step.files: array with { path | contentBase64, name, mimeType }
+        // 2) step.data: string or array of strings with file paths
+        const toUploads: any[] = [];
+        const resolveFrom = step.resolveFrom || "cwd";
+        const pathMod = require("path");
+
+        if (Array.isArray(step.files) && step.files.length) {
+          for (const f of step.files) {
+            if (f.contentBase64) {
+              const buf = Buffer.from(String(f.contentBase64), "base64");
+              toUploads.push({
+                buffer: buf,
+                name: f.name || "upload.bin",
+                mimeType: f.mimeType,
+              });
+            } else if (f.path) {
+              const p = String(f.path);
+              const resolvedPath =
+                resolveFrom === "cwd" &&
+                !(p.startsWith("/") || p.match(/^[A-Za-z]:\\\\/))
+                  ? pathMod.resolve(process.cwd(), p)
+                  : p;
+              toUploads.push(resolvedPath);
+            }
+          }
+        } else {
+          const asArray = Array.isArray(step.data) ? step.data : [step.data];
+          const filePaths = asArray.filter((p) => !!p).map((p) => String(p));
+          if (!filePaths.length) {
+            throw new Error(
+              "upload action requires 'files' array or 'data' with a file path or array of file paths"
+            );
+          }
+          for (const p of filePaths) {
+            const resolvedPath =
+              resolveFrom === "cwd" &&
+              !(p.startsWith("/") || p.match(/^[A-Za-z]:\\\\/))
+                ? pathMod.resolve(process.cwd(), p)
+                : p;
+            toUploads.push(resolvedPath);
+          }
+        }
+
+        if (step.clearFirst) {
+          await locator.setInputFiles([]);
+        }
+        await locator.setInputFiles(
+          toUploads as any,
+          step.actionOptions as any
+        );
+        break;
+      }
       case "fill":
-        if (locator) await locator.fill(step.data);
+        if (locator)
+          await locator.fill(
+            String(step.data ?? ""),
+            step.actionOptions as any
+          );
         break;
       case "type":
-        if (locator) await locator.type(step.data);
+        if (locator)
+          await locator.type(
+            String(step.data ?? ""),
+            step.actionOptions as any
+          );
         break;
       case "click":
-        if (locator) await locator.click();
+        if (locator) await locator.click(step.actionOptions as any);
         break;
       case "hover":
-        if (locator) await locator.hover();
+        if (locator) await locator.hover(step.actionOptions as any);
         break;
       case "press":
-        if (locator) await locator.press(step.data);
+        if (locator)
+          await locator.press(
+            String(step.data ?? ""),
+            step.actionOptions as any
+          );
         break;
       case "waitForTimeout":
         if (step.waitTime) await this.page.waitForTimeout(step.waitTime);
         break;
       case "custom":
-        if (!step.customName || !customLogicMap[step.customName]) {
-          throw new Error(`Custom action '${step.customName}' not found in customLogicMap.`);
+        // @ts-ignore allow customName from JSON
+        if (
+          !(step as any).customName ||
+          !customLogicMap[(step as any).customName]
+        ) {
+          throw new Error(
+            `Custom action '${
+              (step as any).customName
+            }' not found in customLogicMap.`
+          );
         }
-        await customLogicMap[step.customName](this.page, step, context);
+        // @ts-ignore allow customName from JSON
+        await customLogicMap[(step as any).customName](
+          this.page,
+          step,
+          context
+        );
         break;
       default:
         throw new Error(`Unsupported action: ${step.action}`);
     }
   }
 
-  async executeValidation(validation) {
+  async executeValidation(
+    validation: ValidationStep,
+    extras: { locator?: Locator; context?: Record<string, any> } = {}
+  ) {
     const locator = validation.selector
-      ? this.getLocator(validation.selector, validation.selectorType)
-      : undefined;
-    const currentExpect = validation.soft ? expect.soft : expect;
+      ? this.getLocator(
+          validation.selector,
+          validation.selectorType as any // narrow to supported types
+        )
+      : extras.locator;
+    const currentExpect: typeof expect = validation.soft
+      ? (expect as any).soft
+      : expect;
 
     switch (validation.type) {
-      case "toBeVisible":
+      case "toBeVisible": {
+        if (!locator) throw new Error("toBeVisible requires a selector");
         await currentExpect(locator, validation.message).toBeVisible();
         break;
-      case "toBeHidden":
+      }
+      case "toBeHidden": {
+        if (!locator) throw new Error("toBeHidden requires a selector");
         await currentExpect(locator, validation.message).toBeHidden();
         break;
+      }
       case "toHaveTitle":
         await currentExpect(this.page, validation.message).toHaveTitle(
-          validation.data
+          String(validation.data ?? "")
         );
         break;
       case "toHaveURL":
         await currentExpect(this.page, validation.message).toHaveURL(
-          new RegExp(validation.data)
+          new RegExp(String(validation.data ?? ""))
         );
         break;
-      case "toHaveText":
+      case "toHaveText": {
+        if (!locator) throw new Error("toHaveText requires a selector");
         await currentExpect(locator, validation.message).toHaveText(
-          validation.data
+          String(validation.data ?? "")
         );
         break;
-      case "toHaveValue":
+      }
+      case "toHaveValue": {
+        if (!locator) throw new Error("toHaveValue requires a selector");
         await currentExpect(locator, validation.message).toHaveValue(
-          validation.data
+          String(validation.data ?? "")
         );
         break;
+      }
       case "toHaveAttribute":
         if (!validation.attribute) {
           throw new Error(
             "Validation type 'toHaveAttribute' requires an 'attribute' key."
           );
         }
+        if (!locator) throw new Error("toHaveAttribute requires a selector");
         await currentExpect(locator, validation.message).toHaveAttribute(
           validation.attribute,
-          validation.data
+          String(validation.data ?? "")
         );
         break;
       case "toHaveCSS":
@@ -142,19 +259,40 @@ class ActionExecutor {
             "Validation type 'toHaveCSS' requires a 'cssProperty' key."
           );
         }
+        if (!locator) throw new Error("toHaveCSS requires a selector");
         await currentExpect(locator, validation.message).toHaveCSS(
           validation.cssProperty,
-          validation.data
+          String(validation.data ?? "")
         );
         break;
-      case "toHaveClass":
+      case "toHaveClass": {
+        if (!locator) throw new Error("toHaveClass requires a selector");
         await currentExpect(locator, validation.message).toHaveClass(
-          new RegExp(validation.data)
+          new RegExp(String(validation.data ?? ""))
         );
         break;
+      }
+      case "custom": {
+        // @ts-ignore allow customName on validation
+        const name = (validation as any).customName;
+        if (!name || !customValidationMap[name]) {
+          throw new Error(
+            `Custom validation '${name}' not found in customValidationMap.`
+          );
+        }
+        await customValidationMap[name](this.page as any, validation as any, {
+          locator,
+          expect: currentExpect,
+          ...(extras.context || {}),
+        });
+        break;
+      }
       default:
-        console.warn(`Unsupported validation type: ${validation.type}`);
+        logger.warn(
+          `Unsupported validation type: ${validation.type}`,
+          "ActionExecutor"
+        );
     }
   }
 }
-module.exports = { ActionExecutor };
+export default ActionExecutor;
