@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createTestcases, updateTestcase } from '../api';
 import { useToast } from './ToastProvider';
+import { useLogger } from './LoggerProvider';
 
 const emptyStep = () => ({ stepName: '', action: 'goto', path: '', selector: '', selectorType: 'css', data: '', waitTime: 0, iterate: false, customName: '', soft: false, validations: [] });
 const emptyValidation = () => ({ type: 'toBeVisible', selector: '', selectorType: 'css', path: '', data: '', message: '', soft: false, attribute: '', cssProperty: '' });
@@ -9,10 +10,33 @@ export default function TestCaseForm({ existing, onSaved }) {
   const [data, setData] = useState({ description: '', enabled: true, testSteps: [], testOrder: null });
   const [errors, setErrors] = useState([]);
   const toast = useToast();
+  const logger = useLogger();
+  // UI-only state: per-step data mode ('text' | 'json') and raw JSON text & parse errors
+  const [dataModeByStep, setDataModeByStep] = useState({}); // { [index]: 'text'|'json' }
+  const [jsonTextByStep, setJsonTextByStep] = useState({}); // { [index]: string }
+  const [jsonErrByStep, setJsonErrByStep] = useState({}); // { [index]: string|null }
 
   const expectsData = (type) => type === 'toHaveText' || type === 'count' || type === 'text';
+  const selectorRequiredFor = new Set(['toBeVisible','toBeHidden','toHaveText','toHaveValue','toHaveAttribute','toHaveCSS','toHaveClass']);
 
-  useEffect(() => { if (existing) setData(existing); else setData({ description: '', enabled: true, testSteps: [], testOrder: null }); }, [existing]);
+  useEffect(() => {
+    if (existing) setData(existing); else setData({ description: '', enabled: true, testSteps: [], testOrder: null });
+  }, [existing]);
+
+  // Keep UI mode and JSON text in sync with current steps
+  useEffect(() => {
+    const modes = {};
+    const texts = {};
+    (data.testSteps || []).forEach((s, i) => {
+      const isJson = s && typeof s.data === 'object' && s.data !== null;
+      modes[i] = isJson ? 'json' : 'text';
+      if (isJson) texts[i] = JSON.stringify(s.data, null, 2);
+      else texts[i] = s?.data != null ? String(s.data) : '';
+    });
+    setDataModeByStep(modes);
+    setJsonTextByStep(texts);
+    setJsonErrByStep({});
+  }, [data.testSteps]);
 
   function addStep() { setData(d => ({ ...d, testSteps: [...d.testSteps, emptyStep()] })); }
   function removeStep(i) { setData(d => ({ ...d, testSteps: d.testSteps.filter((_, idx) => idx !== i) })); }
@@ -23,6 +47,8 @@ export default function TestCaseForm({ existing, onSaved }) {
 
   function clientValidate(d) {
     const errs = [];
+    // Block save if any JSON parse errors exist
+    Object.values(jsonErrByStep || {}).forEach((msg) => { if (msg) errs.push('Fix JSON errors in step data before saving.'); });
     if (!d.description?.trim()) errs.push('Description is required.');
     if (!Array.isArray(d.testSteps) || d.testSteps.length === 0) errs.push('At least one step is required.');
     d.testSteps.forEach((s, i) => {
@@ -30,10 +56,11 @@ export default function TestCaseForm({ existing, onSaved }) {
       if (s.action === 'goto' && !(s.path && s.path.toString().length)) errs.push(`Step ${i + 1}: path is required for goto.`);
       if ((['click','hover','fill','type','press']).includes(s.action) && !(s.selector && s.selector.toString().length)) errs.push(`Step ${i + 1}: selector is required for ${s.action}.`);
       if ((['fill','type','press']).includes(s.action) && (s.data === undefined || s.data === null || s.data === '')) errs.push(`Step ${i + 1}: data is required for ${s.action}.`);
+      if (s.action === 'custom' && !(s.customName && String(s.customName).trim())) errs.push(`Step ${i + 1}: customName is required for custom action.`);
       if (s.action === 'waitForTimeout' && (typeof s.waitTime !== 'number' || s.waitTime < 0)) errs.push(`Step ${i + 1}: waitTime must be >= 0.`);
       (s.validations || []).forEach((v, vi) => {
         if (!v.type) errs.push(`Step ${i + 1} - Validation ${vi + 1}: type is required.`);
-        if (!v.selector) errs.push(`Step ${i + 1} - Validation ${vi + 1}: selector is required.`);
+        if (selectorRequiredFor.has(v.type) && !v.selector) errs.push(`Step ${i + 1} - Validation ${vi + 1}: selector is required for ${v.type}.`);
         if (expectsData(v.type) && (v.data === undefined || v.data === null || v.data === '')) {
           errs.push(`Step ${i + 1} - Validation ${vi + 1}: data is required for ${v.type}.`);
         }
@@ -49,7 +76,13 @@ export default function TestCaseForm({ existing, onSaved }) {
       const localErrors = clientValidate(data);
       setErrors(localErrors);
       if (localErrors.length) return;
-  if (existing && existing.filename) await updateTestcase(existing.filename, data); else await createTestcases(data);
+  if (existing && existing.filename) {
+    await updateTestcase(existing.filename, data);
+    logger.info('Updated test case', { filename: existing.filename, description: data.description });
+  } else {
+    await createTestcases(data);
+    logger.info('Created test case', { description: data.description });
+  }
       onSaved && onSaved();
   toast.success(existing && existing.filename ? 'Updated test case' : 'Created test case');
     } catch (err) {
@@ -57,6 +90,7 @@ export default function TestCaseForm({ existing, onSaved }) {
       const serverErr = (err?.response?.data?.error || err.message);
       setErrors(prev => [...prev, serverErr]);
   toast.error('Save failed — ' + serverErr);
+      logger.error('Save failed', { error: serverErr, editing: !!existing?.filename });
     }
   }
 
@@ -119,6 +153,7 @@ export default function TestCaseForm({ existing, onSaved }) {
                   <option value="type">type</option>
                   <option value="press">press</option>
                   <option value="hover">hover</option>
+                  <option value="upload">upload</option>
                   <option value="waitForTimeout">waitForTimeout</option>
                   <option value="custom">custom</option>
                 </select>
@@ -139,8 +174,94 @@ export default function TestCaseForm({ existing, onSaved }) {
                 </select>
               </div>
               <div>
-                <label className="block text-sm">Step Data {(['fill','type','press'].includes(s.action)) && <span className="text-red-600">*</span>}</label>
-                <input aria-required={['fill','type','press'].includes(s.action) ? 'true' : 'false'} className="w-full px-2 py-1 border rounded" placeholder="data (optional)" value={s.data || ''} onChange={e => changeStep(i, { data: e.target.value })} />
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm">Step Data {(['fill','type','press'].includes(s.action)) && <span className="text-red-600">*</span>}</label>
+                  <div className="flex items-center gap-2">
+                    {/* Templates */}
+                    {(s.action === 'custom' || s.action === 'upload') && (
+                      <div className="rounded border overflow-hidden text-xs">
+                        {/* Insert templates */}
+                        <button type="button" className="px-2 py-1" title="Insert template"
+                          onClick={() => {
+                            // default: insert minimal template per action
+                            const insert = () => {
+                              if (s.action === 'custom') {
+                                const tpl = { word: 'Example', selector: '', nth: 0, mode: 'mouse', method: 'double', wordwise: false };
+                                const txt = JSON.stringify(tpl, null, 2);
+                                setDataModeByStep(m => ({ ...m, [i]: 'json' }));
+                                setJsonTextByStep(t => ({ ...t, [i]: txt }));
+                                setJsonErrByStep(e => ({ ...e, [i]: null }));
+                                setData(d => { const next = [...d.testSteps]; next[i] = { ...next[i], data: tpl }; return { ...d, testSteps: next }; });
+                              } else if (s.action === 'upload') {
+                                const tpl = ["relative/path/to/file.png"]; const txt = JSON.stringify(tpl, null, 2);
+                                setDataModeByStep(m => ({ ...m, [i]: 'json' }));
+                                setJsonTextByStep(t => ({ ...t, [i]: txt }));
+                                setJsonErrByStep(e => ({ ...e, [i]: null }));
+                                setData(d => { const next = [...d.testSteps]; next[i] = { ...next[i], data: tpl }; return { ...d, testSteps: next }; });
+                              }
+                            };
+                            insert();
+                          }}>Template</button>
+                      </div>
+                    )}
+                    <div className="rounded border overflow-hidden text-xs" role="tablist" aria-label="Data type">
+                    <button type="button" className={`px-2 py-1 ${dataModeByStep[i] === 'text' ? 'bg-gray-100' : ''}`} onClick={() => {
+                      // switch to text: if current data is object, stringify it
+                      setData(d => {
+                        const next = [...d.testSteps];
+                        const cur = next[i] || {};
+                        if (cur && typeof cur.data === 'object' && cur.data !== null) {
+                          next[i] = { ...cur, data: JSON.stringify(cur.data) };
+                        }
+                        return { ...d, testSteps: next };
+                      });
+                      setDataModeByStep(m => ({ ...m, [i]: 'text' }));
+                      setJsonErrByStep(e => ({ ...e, [i]: null }));
+                    }}>Text</button>
+                    <button type="button" className={`px-2 py-1 ${dataModeByStep[i] === 'json' ? 'bg-gray-100' : ''}`} onClick={() => {
+                      // switch to json: attempt to parse, or set {} and store raw text
+                      const raw = jsonTextByStep[i] ?? (s?.data != null ? String(s.data) : '');
+                      try {
+                        const parsed = raw && raw.trim() ? JSON.parse(raw) : {};
+                        setData(d => { const next = [...d.testSteps]; next[i] = { ...next[i], data: parsed }; return { ...d, testSteps: next }; });
+                        setJsonErrByStep(e => ({ ...e, [i]: null }));
+                      } catch (err) {
+                        setJsonErrByStep(e => ({ ...e, [i]: 'Invalid JSON' }));
+                      }
+                      setDataModeByStep(m => ({ ...m, [i]: 'json' }));
+                    }}>JSON</button>
+                    </div>
+                  </div>
+                </div>
+                {dataModeByStep[i] === 'json' ? (
+                  <>
+                    <textarea
+                      className={`w-full px-2 py-1 border rounded font-mono text-xs min-h-[90px] ${jsonErrByStep[i] ? 'border-red-500' : ''}`}
+                      placeholder='e.g. {"key":"value"}'
+                      value={jsonTextByStep[i] ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setJsonTextByStep(t => ({ ...t, [i]: val }));
+                        try {
+                          const parsed = val && val.trim() ? JSON.parse(val) : {};
+                          setData(d => { const next = [...d.testSteps]; next[i] = { ...next[i], data: parsed }; return { ...d, testSteps: next }; });
+                          setJsonErrByStep(e => ({ ...e, [i]: null }));
+                        } catch (err) {
+                          setJsonErrByStep(e => ({ ...e, [i]: 'Invalid JSON' }));
+                        }
+                      }}
+                    />
+                    {jsonErrByStep[i] && <p className="text-xs text-red-600 mt-1">{jsonErrByStep[i]}</p>}
+                  </>
+                ) : (
+                  <input
+                    aria-required={['fill','type','press'].includes(s.action) ? 'true' : 'false'}
+                    className="w-full px-2 py-1 border rounded"
+                    placeholder="data (optional)"
+                    value={typeof s.data === 'object' && s.data !== null ? JSON.stringify(s.data) : (s.data || '')}
+                    onChange={e => changeStep(i, { data: e.target.value })}
+                  />
+                )}
               </div>
               {s.action === 'waitForTimeout' && (
                 <div>
@@ -180,6 +301,7 @@ export default function TestCaseForm({ existing, onSaved }) {
                       <option value="toHaveAttribute">toHaveAttribute</option>
                       <option value="toHaveCSS">toHaveCSS</option>
                       <option value="toHaveClass">toHaveClass</option>
+                      <option value="custom">custom</option>
                     </select>
                   </div>
                   <div>
@@ -210,6 +332,12 @@ export default function TestCaseForm({ existing, onSaved }) {
                     <label className="block text-sm">Message</label>
                     <input className="w-full px-2 py-1 border rounded" placeholder="message" value={v.message || ''} onChange={e => changeValidation(i, vi, { message: e.target.value })} />
                   </div>
+                  {v.type === 'custom' && (
+                    <div>
+                      <label className="block text-sm">Custom Name <span className="text-red-600">*</span></label>
+                      <input className="w-full px-2 py-1 border rounded" placeholder="custom validation key" value={v.customName || ''} onChange={e => changeValidation(i, vi, { customName: e.target.value })} />
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm">Attribute {v.type === 'toHaveAttribute' && <span className='text-red-600'>*</span>}</label>
                     <input className="w-full px-2 py-1 border rounded" placeholder="e.g., aria-hidden" value={v.attribute || ''} onChange={e => changeValidation(i, vi, { attribute: e.target.value })} />

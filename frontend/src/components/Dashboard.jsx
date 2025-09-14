@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchTestcases, deleteTestcase, createTestcases, updateTestcase } from '../api';
+import { fetchTestcases, deleteTestcase, createTestcases, updateTestcase, runTest } from '../api';
 import TestCaseForm from './TestCaseForm';
 import BatchCreate from './BatchCreate';
 import { useToast } from './ToastProvider';
+import { useLogger } from './LoggerProvider';
 
 export default function Dashboard() {
   const [items, setItems] = useState([]);
@@ -13,10 +14,31 @@ export default function Dashboard() {
   const [isOverDropzone, setIsOverDropzone] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
   const toast = useToast();
+  const logger = useLogger();
   const [query, setQuery] = useState('');
   const [showEnabledOnly, setShowEnabledOnly] = useState(false);
   const [mode, setMode] = useState('single'); // 'single' | 'batch'
   const [sidebarOpen, setSidebarOpen] = useState(true); // collapsible list panel
+  const [running, setRunning] = useState(null); // filename currently running
+  const [runResult, setRunResult] = useState(null); // { ok, code, stdout, stderr, for }
+
+  // Helpers: human-readable time formatting
+  const formatTimestamp = (ts) => {
+    if (ts === null || ts === undefined) return '-';
+    const d = typeof ts === 'number' ? new Date(ts) : new Date(String(ts));
+    if (isNaN(d.getTime())) return '-';
+    return d.toLocaleString();
+  };
+  const formatDuration = (ms) => {
+    if (ms === null || ms === undefined || isNaN(ms)) return '-';
+    const val = Math.max(0, ms);
+    if (val < 1000) return `${val} ms`;
+    const s = val / 1000;
+    if (s < 60) return `${s.toFixed(2)} s`;
+    const m = Math.floor(s / 60);
+    const rem = s - m * 60;
+    return `${m}m ${rem.toFixed(1)}s`;
+  };
 
   useEffect(() => { load(); }, []);
   const load = async () => { const data = await fetchTestcases(); setItems(data); };
@@ -38,6 +60,7 @@ export default function Dashboard() {
     a.download = 'test-cases.json';
     a.click();
     URL.revokeObjectURL(url);
+    logger.info('Export all', { count: items.length });
   };
 
   const exportOne = (it) => {
@@ -49,6 +72,7 @@ export default function Dashboard() {
     a.download = filename || 'testcase.json';
     a.click();
     URL.revokeObjectURL(url);
+    logger.info('Export one', { filename: it.filename });
   };
 
   // Open a test case in editor; if currently in batch mode, switch to single and notify
@@ -71,9 +95,11 @@ export default function Dashboard() {
   await createTestcases(json);
   await load();
   toast.success('Imported test case(s) successfully');
+      logger.info('Import from file input', { count: Array.isArray(json) ? json.length : 1, name: file.name });
     } catch (err) {
       console.error(err);
   toast.error('Import failed — ' + (err?.response?.data?.error || err.message));
+      logger.error('Import failed (file input)', { error: err?.response?.data?.error || err.message });
     } finally {
       e.target.value = '';
     }
@@ -94,9 +120,11 @@ export default function Dashboard() {
   await createTestcases(payload);
   await load();
   toast.success('Imported test case(s) successfully');
+      logger.info('Import via drop', { files: files.map(f => f.name), count: payload.length });
     } catch (err) {
       console.error(err);
   toast.error('Import failed — ' + (err?.response?.data?.error || err.message));
+      logger.error('Import failed (drop)', { error: err?.response?.data?.error || err.message });
     }
   };
 
@@ -119,6 +147,7 @@ export default function Dashboard() {
     clearSelection();
   await load();
   toast.success('Deleted selected test case(s)');
+    logger.info('Deleted selected', { count: selected.size });
   };
 
   // Duplicate actions
@@ -127,6 +156,7 @@ export default function Dashboard() {
   await createTestcases({ ...content });
   await load();
   toast.success('Duplicated test case');
+    logger.info('Duplicated one', { source: filename });
   };
   const duplicateSelected = async () => {
     const toDup = items.filter(i => selected.has(i.filename)).map(({ filename, ...content }) => content);
@@ -135,6 +165,7 @@ export default function Dashboard() {
     clearSelection();
   await load();
   toast.success('Duplicated selected test case(s)');
+    logger.info('Duplicated selected', { count: toDup.length });
   };
 
   // Drag-and-drop reordering within list
@@ -159,9 +190,11 @@ export default function Dashboard() {
       setSavingOrder(true);
       const changed = reassigned.filter(it => prevOrderByFile.get(it.filename) !== it.testOrder);
       await Promise.all(changed.map(it => updateTestcase(it.filename, { description: it.description, enabled: it.enabled, testSteps: it.testSteps, testOrder: it.testOrder })));
+      logger.info('Reorder saved', { changed: changed.length });
     } catch (err) {
       console.error(err);
   toast.error('Failed to save order — ' + (err?.response?.data?.error || err.message));
+      logger.error('Reorder save failed', { error: err?.response?.data?.error || err.message });
       await load();
     } finally {
       setSavingOrder(false);
@@ -181,9 +214,11 @@ export default function Dashboard() {
       setSavingOrder(true);
       const changed = reassigned.filter(it => prevOrderByFile.get(it.filename) !== it.testOrder);
       await Promise.all(changed.map(it => updateTestcase(it.filename, { description: it.description, enabled: it.enabled, testSteps: it.testSteps, testOrder: it.testOrder })));
+      logger.info('Move saved', { changed: changed.length });
     } catch (err) {
       console.error(err);
   toast.error('Failed to save order — ' + (err?.response?.data?.error || err.message));
+      logger.error('Move save failed', { error: err?.response?.data?.error || err.message });
       await load();
     } finally {
       setSavingOrder(false);
@@ -191,18 +226,9 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="p-6 min-h-screen bg-gray-50">
+  <div className="p-6 min-h-screen">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <button
-          className={`icon-btn ${sidebarOpen ? 'icon-primary' : 'icon-muted'}`}
-          onClick={() => setSidebarOpen(v => !v)}
-          title={sidebarOpen ? 'Hide test list' : 'Show test list'}
-          aria-label="Toggle test list"
-          aria-expanded={sidebarOpen}
-        >
-          <span className="mi">{sidebarOpen ? 'menu_open' : 'menu'}</span>
-        </button>
         <div>
           <h1 className="text-2xl font-bold">Test Cases</h1>
           <p className="text-sm text-gray-500">Create, import, export, and order your test cases</p>
@@ -253,6 +279,14 @@ export default function Dashboard() {
         <div className="md:col-span-1">
           {/* Bulk bar */}
           <div className="flex items-center gap-2 mb-2">
+            <button
+              className="icon-btn icon-muted"
+              onClick={() => setSidebarOpen(false)}
+              title="Hide test list"
+              aria-label="Hide test list"
+            >
+              <span className="mi">chevron_left</span>
+            </button>
             <button className="icon-btn icon-muted" onClick={selectAll} title="Select all" aria-label="Select all"><span className="mi">select_check_box</span></button>
             <button className="icon-btn icon-muted" onClick={clearSelection} title="Clear selection" aria-label="Clear selection"><span className="mi">clear_all</span></button>
             <button className="icon-btn icon-danger disabled:opacity-50" onClick={deleteSelected} disabled={!selected.size} title="Delete selected" aria-label="Delete selected"><span className="mi">delete</span></button>
@@ -290,11 +324,87 @@ export default function Dashboard() {
                     </div>
                     <div className="font-medium truncate">{it.description}</div>
                     <div className="mt-1 flex gap-2 text-sm text-gray-700 items-center">
+                        <button
+                          className="icon-btn icon-danger disabled:opacity-50"
+                          title="Run this test"
+                          aria-label="Run test"
+                          disabled={running === it.filename}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setRunResult(null);
+                            setRunning(it.filename);
+                            toast.info(`Running: ${it.description || it.filename}`);
+                            logger.info('Run started', { filename: it.filename, description: it.description });
+                            try {
+                              const { filename, ...scenario } = it;
+                              const res = await runTest({ scenarios: [scenario], headless: true });
+                              // Normalize possible response shapes
+                              let report = null;
+                              if (Array.isArray(res)) report = res[0];
+                              else if (Array.isArray(res?.reports)) report = res.reports[0];
+                              else if (Array.isArray(res?.results)) report = res.results[0];
+                              else if (Array.isArray(res?.scenarios)) report = res.scenarios[0];
+                              else if (res?.report) report = res.report;
+                              else if (res?.result) report = res.result;
+                              else if (res?.data?.report) report = res.data.report;
+                              else if (res?.title || res?.steps || res?.status || res?.location) report = res;
+
+                              // Structured report handling
+                              if (report && Array.isArray(report.steps)) {
+                                const allPassed = ((report.status || '').toLowerCase() === 'passed') || report.steps.every(s => s.status === 'passed');
+                                // Convert string timestamps to numbers for duration rendering
+                                const startTime = typeof report.startTime === 'string' ? Date.parse(report.startTime) : report.startTime;
+                                const endTime = typeof report.endTime === 'string' ? Date.parse(report.endTime) : report.endTime;
+                                const steps = report.steps.map(s => ({
+                                  ...s,
+                                  startTime: typeof s.startTime === 'string' ? Date.parse(s.startTime) : s.startTime,
+                                  endTime: typeof s.endTime === 'string' ? Date.parse(s.endTime) : s.endTime,
+                                }));
+                                setRunResult({ ok: allPassed, for: it.filename, ...report, startTime, endTime, steps });
+                                if (allPassed) {
+                                  toast.success('Test run finished successfully');
+                                  logger.info('Run succeeded', { filename: it.filename, steps: steps.length, passed: steps.filter(s => s.status === 'passed').length, durationMs: (endTime && startTime) ? (endTime - startTime) : undefined });
+                                } else {
+                                  toast.error('Test run failed — see error panel');
+                                  logger.warn('Run failed', { filename: it.filename, steps: steps.length, failed: steps.filter(s => s.status !== 'passed').length, status: report.status });
+                                }
+                              } else {
+                                // Fallback to CLI-like output
+                                const code = report?.code ?? res?.code;
+                                const stdout = report?.stdout ?? res?.stdout ?? report?.output ?? res?.output ?? report?.logs ?? res?.logs ?? '';
+                                const stderr = report?.stderr ?? res?.stderr ?? report?.error ?? res?.error ?? '';
+                                const ok = code !== undefined ? Number(code) === 0 : false;
+                                setRunResult({ ok, code, stdout, stderr, for: it.filename });
+                                if (ok) {
+                                  toast.success('Test run finished successfully');
+                                  logger.info('Run succeeded (CLI mode)', { filename: it.filename, code, stdoutLen: String(stdout || '').length, stderrLen: String(stderr || '').length });
+                                } else {
+                                  toast.error('Test run failed — see error panel');
+                                  logger.warn('Run failed (CLI mode)', { filename: it.filename, code, stderrSnippet: String(stderr || '').slice(0, 200) });
+                                }
+                              }
+                            } catch (err) {
+                              const msg = err?.response?.data?.error || err.message || 'Unknown error';
+                              setRunResult({ ok: false, code: undefined, stdout: '', stderr: msg, for: it.filename });
+                              toast.error('Test run failed — see error panel');
+                              logger.error('Run error', { filename: it.filename, error: msg });
+                            } finally {
+                              setRunning(null);
+                              logger.debug('Run finished', { filename: it.filename });
+                            }
+                          }}
+                        >
+                          {running === it.filename ? (
+                            <span className="spinner" aria-hidden />
+                          ) : (
+                            <span className="mi">play_arrow</span>
+                          )}
+                        </button>
                       <span className={`toggle-btn ${it.enabled ? 'toggle-on' : 'toggle-off'}`} title={it.enabled ? 'Enabled' : 'Disabled'} aria-label="Enabled state"><span className="mi">{it.enabled ? 'toggle_on' : 'toggle_off'}</span></span>
                       <button className="icon-btn icon-muted" title="Edit" aria-label="Edit" onClick={(e) => { e.stopPropagation(); openForEdit(it); }}><span className="mi">edit</span></button>
                       <button className="icon-btn icon-success" title="Export" aria-label="Export" onClick={(e) => { e.stopPropagation(); exportOne(it); }}><span className="mi">download</span></button>
                       <button className="icon-btn icon-primary" title="Duplicate" aria-label="Duplicate" onClick={(e) => { e.stopPropagation(); duplicateOne(it); }}><span className="mi">content_copy</span></button>
-                      <button className="icon-btn icon-danger" title="Delete" aria-label="Delete" onClick={(e) => { e.stopPropagation(); deleteTestcase(it.filename).then(load).then(() => toast.success('Deleted')); }}><span className="mi">delete</span></button>
+                      <button className="icon-btn icon-danger" title="Delete" aria-label="Delete" onClick={async (e) => { e.stopPropagation(); try { await deleteTestcase(it.filename); await load(); toast.success('Deleted'); logger.info('Deleted one', { filename: it.filename }); } catch (err) { toast.error('Delete failed — ' + (err?.response?.data?.error || err.message)); logger.error('Delete failed', { filename: it.filename, error: err?.response?.data?.error || err.message }); } }}><span className="mi">delete</span></button>
                     </div>
                   </div>
                   <span className="icon-btn icon-muted cursor-grab select-none" title="Drag to reorder" aria-label="Drag handle"><span className="mi">drag_indicator</span></span>
@@ -302,12 +412,99 @@ export default function Dashboard() {
               );
             })}
           </div>
-        </div>
+  </div>
         )}
 
         {/* Editor column */}
-        <div className={sidebarOpen ? "md:col-span-2" : "md:col-span-3"}>
+        <div className={sidebarOpen ? "md:col-span-2" : "md:col-span-3 relative"}>
           <div className="bg-white border rounded p-4">
+            {runResult && (
+              <div className={`mb-4 border rounded ${runResult.ok ? 'border-emerald-300 bg-emerald-50' : 'border-red-300 bg-red-50'}`}>
+                <div className="px-3 py-2 flex items-center gap-2">
+                  <span className="mi" aria-hidden>{runResult.ok ? 'check_circle' : 'error'}</span>
+                  <strong className={runResult.ok ? 'text-emerald-700' : 'text-red-700'}>
+                    {runResult.ok ? 'Test run completed' : 'Test run finished'}
+                  </strong>
+                  {runResult.code !== undefined && (
+                    <span className="text-gray-700">(exit code: {String(runResult.code)})</span>
+                  )}
+                  <span className="text-gray-500">{runResult.for}</span>
+                  <button className="icon-btn icon-muted ml-auto" onClick={() => setRunResult(null)} title="Close" aria-label="Close"><span className="mi">close</span></button>
+                </div>
+                {/* Structured steps view if available */}
+                {Array.isArray(runResult.steps) ? (
+                  <div className="px-3 pb-3">
+                    <div className="text-sm text-gray-700 mb-2">
+                      <div><span className="font-medium">Title:</span> {runResult.title}</div>
+                      {runResult.location && (<div><span className="font-medium">Location:</span> <code className="text-xs">{runResult.location}</code></div>)}
+                      {(runResult.startTime || runResult.endTime) && (
+                        <div className="text-xs text-gray-600 flex flex-wrap gap-3">
+                          {runResult.startTime && <span>Started: {formatTimestamp(runResult.startTime)}</span>}
+                          {runResult.endTime && <span>Ended: {formatTimestamp(runResult.endTime)}</span>}
+                          {runResult.startTime && runResult.endTime && (
+                            <span>Duration: {formatDuration(runResult.endTime - runResult.startTime)}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between mb-2 text-xs text-gray-600">
+                      {(() => {
+                        const total = Array.isArray(runResult.steps) ? runResult.steps.length : 0;
+                        const passed = Array.isArray(runResult.steps) ? runResult.steps.filter(s => s.status === 'passed').length : 0;
+                        const allPassed = total > 0 && passed === total;
+                        return (
+                          <div>
+                            <span className={allPassed ? 'text-emerald-700' : 'text-gray-700'}>
+                              {passed} / {total} steps passed
+                            </span>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    <div className="overflow-auto">
+                      <table className="min-w-full text-sm bg-white border rounded">
+                        <thead className="bg-gray-50 border-b">
+                          <tr>
+                            <th className="text-left p-2">Step</th>
+                            <th className="text-left p-2">Status</th>
+                            <th className="text-left p-2">Start</th>
+                            <th className="text-left p-2">End</th>
+                            <th className="text-left p-2">Duration</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {runResult.steps.map((s, idx) => {
+                            const dur = (s.endTime && s.startTime) ? (s.endTime - s.startTime) : undefined;
+                            const statusClass = s.status === 'passed' ? 'text-emerald-700' : s.status === 'failed' ? 'text-red-700' : 'text-gray-700';
+                            const statusBadge = s.status === 'passed' ? 'bg-emerald-100' : s.status === 'failed' ? 'bg-red-100' : 'bg-gray-100';
+                            return (
+                              <tr key={idx} className="border-b last:border-0">
+                                <td className="p-2 whitespace-pre-wrap">{s.title}</td>
+                                <td className="p-2"><span className={`inline-block px-2 py-0.5 rounded ${statusBadge} ${statusClass}`}>{s.status || 'unknown'}</span></td>
+                                <td className="p-2 text-xs text-gray-500">{formatTimestamp(s.startTime)}</td>
+                                <td className="p-2 text-xs text-gray-500">{formatTimestamp(s.endTime)}</td>
+                                <td className="p-2 text-xs text-gray-500">{dur !== undefined ? formatDuration(dur) : '-'}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 px-3 pb-3">
+                    <div>
+                      <div className="text-xs font-medium text-gray-600">stdout</div>
+                      <pre className="overflow-auto text-xs bg-white border rounded p-2 max-h-64"><code>{runResult.stdout || ''}</code></pre>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-gray-600">stderr</div>
+                      <pre className="overflow-auto text-xs bg-white border rounded p-2 max-h-64"><code>{runResult.stderr || ''}</code></pre>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {mode === 'single' ? (
               <>
                 <div className="flex items-center mb-3">
@@ -327,6 +524,16 @@ export default function Dashboard() {
               </>
             )}
           </div>
+          {!sidebarOpen && (
+            <button
+              className="icon-btn icon-muted absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2"
+              title="Show test list"
+              aria-label="Show test list"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <span className="mi">chevron_right</span>
+            </button>
+          )}
         </div>
       </div>
     </div>
