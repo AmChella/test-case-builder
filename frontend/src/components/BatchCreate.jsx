@@ -18,6 +18,10 @@ export default function BatchCreate({ onSaved }) {
   const [dataMode, setDataMode] = useState({}); // { `${di}:${si}`: 'text'|'json' }
   const [jsonText, setJsonText] = useState({}); // { `${di}:${si}`: string }
   const [jsonErr, setJsonErr] = useState({}); // { `${di}:${si}`: string|undefined }
+  const [actionText, setActionText] = useState({}); // { `${di}:${si}`: string }
+  const [actionErr, setActionErr] = useState({}); // { `${di}:${si}`: string|undefined }
+  const [filesText, setFilesText] = useState({}); // { `${di}:${si}`: string }
+  const [filesErr, setFilesErr] = useState({}); // { `${di}:${si}`: string|undefined }
 
   useEffect(() => {
     (async () => {
@@ -55,6 +59,8 @@ export default function BatchCreate({ onSaved }) {
     const errs = [];
     // Block save if any JSON parse errors
     Object.values(jsonErr || {}).forEach((msg) => { if (msg) errs.push('Fix JSON errors in step data before saving.'); });
+    Object.values(actionErr || {}).forEach((msg) => { if (msg) errs.push('Fix JSON errors in action options before saving.'); });
+    Object.values(filesErr || {}).forEach((msg) => { if (msg) errs.push('Fix JSON errors in upload files before saving.'); });
     // duplicate orders within batch
     const counts = new Map();
     list.forEach(d => { if (Number.isInteger(d.testOrder)) counts.set(d.testOrder, (counts.get(d.testOrder) || 0) + 1); });
@@ -69,6 +75,8 @@ export default function BatchCreate({ onSaved }) {
         if ((['click','hover','fill','type','press']).includes(s.action) && !(s.selector && s.selector.toString().length)) errs.push(`Case ${di + 1} - Step ${i + 1}: selector is required for ${s.action}.`);
         if ((['fill','type','press']).includes(s.action) && (s.data === undefined || s.data === null || s.data === '')) errs.push(`Case ${di + 1} - Step ${i + 1}: data is required for ${s.action}.`);
         if (s.action === 'waitForTimeout' && (typeof s.waitTime !== 'number' || s.waitTime < 0)) errs.push(`Case ${di + 1} - Step ${i + 1}: waitTime must be >= 0.`);
+  if (s.waitTime !== undefined && s.waitTime !== null && s.waitTime !== '' && Number(s.waitTime) < 0) errs.push(`Case ${di + 1} - Step ${i + 1}: waitTime must be >= 0.`);
+  if (s.nth !== undefined && s.nth !== null && s.nth !== '' && (!Number.isInteger(Number(s.nth)) || Number(s.nth) < 0)) errs.push(`Case ${di + 1} - Step ${i + 1}: nth must be a non-negative integer.`);
         (s.validations || []).forEach((v, vi) => {
           if (!v.type) errs.push(`Case ${di + 1} - Step ${i + 1} - Validation ${vi + 1}: type is required.`);
           if (selectorRequiredFor.has(v.type) && !v.selector) errs.push(`Case ${di + 1} - Step ${i + 1} - Validation ${vi + 1}: selector is required for ${v.type}.`);
@@ -180,7 +188,7 @@ export default function BatchCreate({ onSaved }) {
             <div>
               <h4 className="font-medium">Steps</h4>
               {d.testSteps.map((s, si) => (
-                <div key={si} className="p-2 border rounded my-2 grid grid-cols-1 md:grid-cols-5 gap-2 bg-blue-50/50">
+                <div key={si} className="p-2 border rounded my-2 grid grid-cols-1 md:grid-cols-6 gap-2 bg-blue-50/50">
                   <div className="md:col-span-2">
                     <label className="block text-sm">Step Name</label>
                     <input className="w-full px-2 py-1 border rounded" placeholder="stepName" value={s.stepName} onChange={e => changeStep(di, si, { stepName: e.target.value })} />
@@ -212,6 +220,14 @@ export default function BatchCreate({ onSaved }) {
                       <option value="text">text</option>
                       <option value="testId">testId</option>
                     </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm">Nth (optional)</label>
+                    <input className="w-full px-2 py-1 border rounded" type="number" min="0" placeholder="0" value={s.nth ?? ''} onChange={e => changeStep(di, si, { nth: e.target.value === '' ? undefined : Number(e.target.value) })} />
+                  </div>
+                  <div>
+                    <label className="block text-sm">Wait Time (ms)</label>
+                    <input className="w-full px-2 py-1 border rounded" type="number" min="0" placeholder="e.g., 500" value={s.waitTime || 0} onChange={e => changeStep(di, si, { waitTime: Number(e.target.value || 0) })} />
                   </div>
                   <div className="md:col-span-1">
                     <div className="flex items-center justify-between mb-1">
@@ -301,23 +317,53 @@ export default function BatchCreate({ onSaved }) {
                       )
                     ); })()}
                   </div>
-                  {s.action === 'waitForTimeout' ? (
-                    <div>
-                      <label className="block text-sm">Wait Time (ms) <span className="text-red-600">*</span></label>
-                      <input aria-required="true" className="w-full px-2 py-1 border rounded" type="number" placeholder="waitTime (ms)" value={s.waitTime || 0} onChange={e => changeStep(di, si, { waitTime: Number(e.target.value || 0) })} />
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-4">
                       <label className="text-sm">Iterate</label>
                       <input type="checkbox" checked={!!s.iterate} onChange={e => changeStep(di, si, { iterate: e.target.checked })} />
                       <label className="text-sm">Soft</label>
                       <input type="checkbox" checked={!!s.soft} onChange={e => changeStep(di, si, { soft: e.target.checked })} />
                     </div>
-                  )}
                   {s.action === 'custom' && (
                     <div>
                       <label className="block text-sm">Custom Name <span className="text-red-600">*</span></label>
                       <input aria-required="true" className="w-full px-2 py-1 border rounded" placeholder="custom logic key" value={s.customName || ''} onChange={e => changeStep(di, si, { customName: e.target.value })} />
+                    </div>
+                  )}
+                  {s.action === 'upload' && (
+                    <div className="md:col-span-6 grid grid-cols-1 md:grid-cols-6 gap-2">
+                      <div className="flex items-end gap-2">
+                        <label className="text-sm">Clear First</label>
+                        <input type="checkbox" checked={!!s.clearFirst} onChange={e => changeStep(di, si, { clearFirst: e.target.checked })} />
+                      </div>
+                      <div>
+                        <label className="block text-sm">Resolve From</label>
+                        <select className="w-full px-2 py-1 border rounded" value={s.resolveFrom || 'cwd'} onChange={e => changeStep(di, si, { resolveFrom: e.target.value })}>
+                          <option value="cwd">cwd</option>
+                          <option value="absolute">absolute</option>
+                        </select>
+                      </div>
+                      <div className="md:col-span-4">
+                        <label className="block text-sm">Files (JSON, optional)</label>
+                        <textarea
+                          className={`w-full px-2 py-1 border rounded font-mono text-xs min-h-[72px] ${filesErr[`${di}:${si}`] ? 'border-red-500' : ''}`}
+                          placeholder='e.g. [{"path":"relative/file.png"}] or [{"contentBase64":"...","name":"file.txt","mimeType":"text/plain"}]'
+                          value={filesText[`${di}:${si}`] ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const key = `${di}:${si}`;
+                            setFilesText(t => ({ ...t, [key]: val }));
+                            try {
+                              const parsed = val && val.trim() ? JSON.parse(val) : [];
+                              if (!Array.isArray(parsed)) throw new Error('Files must be an array');
+                              changeStep(di, si, { files: parsed });
+                              setFilesErr(er => ({ ...er, [key]: undefined }));
+                            } catch (err) {
+                              setFilesErr(er => ({ ...er, [key]: 'Invalid JSON' }));
+                            }
+                          }}
+                        />
+                        {filesErr[`${di}:${si}`] && <p className="text-xs text-red-600 mt-1">{filesErr[`${di}:${si}`]}</p>}
+                      </div>
                     </div>
                   )}
 
@@ -368,7 +414,29 @@ export default function BatchCreate({ onSaved }) {
                     ))}
                   </div>
 
-                  <button title="Remove step" aria-label="Remove step" className="icon-btn icon-danger text-sm md:col-span-5" onClick={() => removeStep(di, si)}><span className="mi">delete</span> Remove Step</button>
+                  <div className="md:col-span-6">
+                    <label className="block text-sm">Action Options (JSON)</label>
+                    <textarea
+                      className={`w-full px-2 py-1 border rounded font-mono text-xs min-h-[72px] ${actionErr[`${di}:${si}`] ? 'border-red-500' : ''}`}
+                      placeholder='e.g. {"timeout": 5000} or {"force": true}'
+                      value={actionText[`${di}:${si}`] ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const key = `${di}:${si}`;
+                        setActionText(t => ({ ...t, [key]: val }));
+                        try {
+                          const parsed = val && val.trim() ? JSON.parse(val) : undefined;
+                          changeStep(di, si, { actionOptions: parsed });
+                          setActionErr(er => ({ ...er, [key]: undefined }));
+                        } catch (err) {
+                          setActionErr(er => ({ ...er, [key]: 'Invalid JSON' }));
+                        }
+                      }}
+                    />
+                    {actionErr[`${di}:${si}`] && <p className="text-xs text-red-600 mt-1">{actionErr[`${di}:${si}`]}</p>}
+                  </div>
+
+                  <button title="Remove step" aria-label="Remove step" className="icon-btn icon-danger text-sm md:col-span-6" onClick={() => removeStep(di, si)}><span className="mi">delete</span> Remove Step</button>
                 </div>
               ))}
               <button className="icon-btn icon-add" onClick={() => addStep(di)} title="Add step" aria-label="Add step"><span className="mi">add</span> Step</button>

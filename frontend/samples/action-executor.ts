@@ -48,19 +48,32 @@ export class ActionExecutor {
       const count = await locator.count();
       for (let i = 0; i < count; i++) {
         const nthLocator = locator.nth(i);
+        // Execute action for this iteration
         await this._executeAction(step, nthLocator, context);
+        // Apply wait time per iteration if provided
+        if (step.waitTime) {
+          await this.page.waitForTimeout(step.waitTime);
+        }
+        // Execute validations for this iteration (use the iteration-specific locator)
+        if (step.validations) {
+          for (const validation of step.validations) {
+            await this.executeValidation(validation, {
+              locator: nthLocator,
+              context,
+            });
+          }
+        }
       }
     } else {
+      // Non-iterative path: single action, optional wait, then validations once
       await this._executeAction(step, locator, context);
-    }
-
-    if (step.waitTime) {
-      await this.page.waitForTimeout(step.waitTime);
-    }
-
-    if (step.validations) {
-      for (const validation of step.validations) {
-        await this.executeValidation(validation, { locator, context });
+      if (step.waitTime) {
+        await this.page.waitForTimeout(step.waitTime);
+      }
+      if (step.validations) {
+        for (const validation of step.validations) {
+          await this.executeValidation(validation, { locator, context });
+        }
       }
     }
   }
@@ -196,48 +209,60 @@ export class ActionExecutor {
     validation: ValidationStep,
     extras: { locator?: Locator; context?: Record<string, any> } = {}
   ) {
-    const locator = validation.selector
+    let locator = validation.selector
       ? this.getLocator(
           validation.selector,
           validation.selectorType as any // narrow to supported types
         )
       : extras.locator;
+    if (
+      locator &&
+      typeof (validation as any).nth === "number" &&
+      (validation as any).nth >= 0
+    ) {
+      locator = locator.nth((validation as any).nth as number);
+    }
     const currentExpect: typeof expect = validation.soft
       ? (expect as any).soft
       : expect;
+    const opts = (validation as any).expectOptions as any;
 
     switch (validation.type) {
       case "toBeVisible": {
         if (!locator) throw new Error("toBeVisible requires a selector");
-        await currentExpect(locator, validation.message).toBeVisible();
+        await currentExpect(locator, validation.message).toBeVisible(opts);
         break;
       }
       case "toBeHidden": {
         if (!locator) throw new Error("toBeHidden requires a selector");
-        await currentExpect(locator, validation.message).toBeHidden();
+        await currentExpect(locator, validation.message).toBeHidden(opts);
         break;
       }
       case "toHaveTitle":
         await currentExpect(this.page, validation.message).toHaveTitle(
-          String(validation.data ?? "")
+          String(validation.data ?? ""),
+          opts
         );
         break;
       case "toHaveURL":
         await currentExpect(this.page, validation.message).toHaveURL(
-          new RegExp(String(validation.data ?? ""))
+          new RegExp(String(validation.data ?? "")),
+          opts
         );
         break;
       case "toHaveText": {
         if (!locator) throw new Error("toHaveText requires a selector");
         await currentExpect(locator, validation.message).toHaveText(
-          String(validation.data ?? "")
+          String(validation.data ?? ""),
+          opts
         );
         break;
       }
       case "toHaveValue": {
         if (!locator) throw new Error("toHaveValue requires a selector");
         await currentExpect(locator, validation.message).toHaveValue(
-          String(validation.data ?? "")
+          String(validation.data ?? ""),
+          opts
         );
         break;
       }
@@ -250,7 +275,8 @@ export class ActionExecutor {
         if (!locator) throw new Error("toHaveAttribute requires a selector");
         await currentExpect(locator, validation.message).toHaveAttribute(
           validation.attribute,
-          String(validation.data ?? "")
+          String(validation.data ?? ""),
+          opts
         );
         break;
       case "toHaveCSS":
@@ -262,13 +288,15 @@ export class ActionExecutor {
         if (!locator) throw new Error("toHaveCSS requires a selector");
         await currentExpect(locator, validation.message).toHaveCSS(
           validation.cssProperty,
-          String(validation.data ?? "")
+          String(validation.data ?? ""),
+          opts
         );
         break;
       case "toHaveClass": {
         if (!locator) throw new Error("toHaveClass requires a selector");
         await currentExpect(locator, validation.message).toHaveClass(
-          new RegExp(String(validation.data ?? ""))
+          new RegExp(String(validation.data ?? "")),
+          opts
         );
         break;
       }

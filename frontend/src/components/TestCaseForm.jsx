@@ -15,6 +15,12 @@ export default function TestCaseForm({ existing, onSaved }) {
   const [dataModeByStep, setDataModeByStep] = useState({}); // { [index]: 'text'|'json' }
   const [jsonTextByStep, setJsonTextByStep] = useState({}); // { [index]: string }
   const [jsonErrByStep, setJsonErrByStep] = useState({}); // { [index]: string|null }
+  // Action options JSON per-step
+  const [actionTextByStep, setActionTextByStep] = useState({}); // { [index]: string }
+  const [actionErrByStep, setActionErrByStep] = useState({}); // { [index]: string|null }
+  // Upload files JSON per-step (optional advanced)
+  const [filesTextByStep, setFilesTextByStep] = useState({}); // { [index]: string }
+  const [filesErrByStep, setFilesErrByStep] = useState({}); // { [index]: string|null }
 
   const expectsData = (type) => type === 'toHaveText' || type === 'count' || type === 'text';
   const selectorRequiredFor = new Set(['toBeVisible','toBeHidden','toHaveText','toHaveValue','toHaveAttribute','toHaveCSS','toHaveClass']);
@@ -27,15 +33,31 @@ export default function TestCaseForm({ existing, onSaved }) {
   useEffect(() => {
     const modes = {};
     const texts = {};
+    const actionTexts = {};
+    const fileTexts = {};
     (data.testSteps || []).forEach((s, i) => {
       const isJson = s && typeof s.data === 'object' && s.data !== null;
       modes[i] = isJson ? 'json' : 'text';
       if (isJson) texts[i] = JSON.stringify(s.data, null, 2);
       else texts[i] = s?.data != null ? String(s.data) : '';
+      if (s && s.actionOptions && typeof s.actionOptions === 'object') {
+        actionTexts[i] = JSON.stringify(s.actionOptions, null, 2);
+      } else {
+        actionTexts[i] = '';
+      }
+      if (Array.isArray(s?.files)) {
+        fileTexts[i] = JSON.stringify(s.files, null, 2);
+      } else {
+        fileTexts[i] = '';
+      }
     });
     setDataModeByStep(modes);
     setJsonTextByStep(texts);
     setJsonErrByStep({});
+    setActionTextByStep(actionTexts);
+    setActionErrByStep({});
+    setFilesTextByStep(fileTexts);
+    setFilesErrByStep({});
   }, [data.testSteps]);
 
   function addStep() { setData(d => ({ ...d, testSteps: [...d.testSteps, emptyStep()] })); }
@@ -49,6 +71,8 @@ export default function TestCaseForm({ existing, onSaved }) {
     const errs = [];
     // Block save if any JSON parse errors exist
     Object.values(jsonErrByStep || {}).forEach((msg) => { if (msg) errs.push('Fix JSON errors in step data before saving.'); });
+    Object.values(actionErrByStep || {}).forEach((msg) => { if (msg) errs.push('Fix JSON errors in action options before saving.'); });
+    Object.values(filesErrByStep || {}).forEach((msg) => { if (msg) errs.push('Fix JSON errors in upload files before saving.'); });
     if (!d.description?.trim()) errs.push('Description is required.');
     if (!Array.isArray(d.testSteps) || d.testSteps.length === 0) errs.push('At least one step is required.');
     d.testSteps.forEach((s, i) => {
@@ -58,6 +82,8 @@ export default function TestCaseForm({ existing, onSaved }) {
       if ((['fill','type','press']).includes(s.action) && (s.data === undefined || s.data === null || s.data === '')) errs.push(`Step ${i + 1}: data is required for ${s.action}.`);
       if (s.action === 'custom' && !(s.customName && String(s.customName).trim())) errs.push(`Step ${i + 1}: customName is required for custom action.`);
       if (s.action === 'waitForTimeout' && (typeof s.waitTime !== 'number' || s.waitTime < 0)) errs.push(`Step ${i + 1}: waitTime must be >= 0.`);
+      if (s.waitTime !== undefined && s.waitTime !== null && s.waitTime !== '' && Number(s.waitTime) < 0) errs.push(`Step ${i + 1}: waitTime must be >= 0.`);
+      if (s.nth !== undefined && s.nth !== null && s.nth !== '' && (!Number.isInteger(Number(s.nth)) || Number(s.nth) < 0)) errs.push(`Step ${i + 1}: nth must be a non-negative integer.`);
       (s.validations || []).forEach((v, vi) => {
         if (!v.type) errs.push(`Step ${i + 1} - Validation ${vi + 1}: type is required.`);
         if (selectorRequiredFor.has(v.type) && !v.selector) errs.push(`Step ${i + 1} - Validation ${vi + 1}: selector is required for ${v.type}.`);
@@ -174,6 +200,14 @@ export default function TestCaseForm({ existing, onSaved }) {
                 </select>
               </div>
               <div>
+                <label className="block text-sm">Nth (optional)</label>
+                <input className="w-full px-2 py-1 border rounded" type="number" min="0" placeholder="0" value={s.nth ?? ''} onChange={e => changeStep(i, { nth: e.target.value === '' ? undefined : Number(e.target.value) })} />
+              </div>
+              <div>
+                <label className="block text-sm">Wait Time (ms)</label>
+                <input className="w-full px-2 py-1 border rounded" type="number" min="0" placeholder="e.g., 500" value={s.waitTime || 0} onChange={e => changeStep(i, { waitTime: Number(e.target.value || 0) })} />
+              </div>
+              <div>
                 <div className="flex items-center justify-between">
                   <label className="block text-sm">Step Data {(['fill','type','press'].includes(s.action)) && <span className="text-red-600">*</span>}</label>
                   <div className="flex items-center gap-2">
@@ -263,10 +297,41 @@ export default function TestCaseForm({ existing, onSaved }) {
                   />
                 )}
               </div>
-              {s.action === 'waitForTimeout' && (
-                <div>
-                  <label className="block text-sm">Wait Time (ms) <span className="text-red-600">*</span></label>
-                  <input aria-required="true" className="w-full px-2 py-1 border rounded" type="number" placeholder="waitTime (ms)" value={s.waitTime || 0} onChange={e => changeStep(i, { waitTime: Number(e.target.value || 0) })} />
+              {/* Upload advanced options */}
+              {s.action === 'upload' && (
+                <div className="md:col-span-2 grid grid-cols-2 gap-2">
+                  <div className="flex items-end gap-2">
+                    <label className="text-sm">Clear First</label>
+                    <input type="checkbox" checked={!!s.clearFirst} onChange={e => changeStep(i, { clearFirst: e.target.checked })} />
+                  </div>
+                  <div>
+                    <label className="block text-sm">Resolve From</label>
+                    <select className="w-full px-2 py-1 border rounded" value={s.resolveFrom || 'cwd'} onChange={e => changeStep(i, { resolveFrom: e.target.value })}>
+                      <option value="cwd">cwd</option>
+                      <option value="absolute">absolute</option>
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm">Files (JSON, optional)</label>
+                    <textarea
+                      className={`w-full px-2 py-1 border rounded font-mono text-xs min-h-[72px] ${filesErrByStep[i] ? 'border-red-500' : ''}`}
+                      placeholder='e.g. [{"path":"relative/file.png"}] or [{"contentBase64":"...","name":"file.txt","mimeType":"text/plain"}]'
+                      value={filesTextByStep[i] ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFilesTextByStep(t => ({ ...t, [i]: val }));
+                        try {
+                          const parsed = val && val.trim() ? JSON.parse(val) : [];
+                          if (!Array.isArray(parsed)) throw new Error('Files must be an array');
+                          changeStep(i, { files: parsed });
+                          setFilesErrByStep(er => ({ ...er, [i]: null }));
+                        } catch (err) {
+                          setFilesErrByStep(er => ({ ...er, [i]: 'Invalid JSON' }));
+                        }
+                      }}
+                    />
+                    {filesErrByStep[i] && <p className="text-xs text-red-600 mt-1">{filesErrByStep[i]}</p>}
+                  </div>
                 </div>
               )}
               {s.action === 'custom' && (
@@ -282,6 +347,26 @@ export default function TestCaseForm({ existing, onSaved }) {
               <div className="flex items-end gap-2">
                 <label className="text-sm">Soft</label>
                 <input type="checkbox" checked={!!s.soft} onChange={e => changeStep(i, { soft: e.target.checked })} />
+              </div>
+              <div className="md:col-span-3">
+                <label className="block text-sm">Action Options (JSON)</label>
+                <textarea
+                  className={`w-full px-2 py-1 border rounded font-mono text-xs min-h-[72px] ${actionErrByStep[i] ? 'border-red-500' : ''}`}
+                  placeholder='e.g. {"timeout": 5000} or {"force": true}'
+                  value={actionTextByStep[i] ?? ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setActionTextByStep(t => ({ ...t, [i]: val }));
+                    try {
+                      const parsed = val && val.trim() ? JSON.parse(val) : undefined;
+                      changeStep(i, { actionOptions: parsed });
+                      setActionErrByStep(er => ({ ...er, [i]: null }));
+                    } catch (err) {
+                      setActionErrByStep(er => ({ ...er, [i]: 'Invalid JSON' }));
+                    }
+                  }}
+                />
+                {actionErrByStep[i] && <p className="text-xs text-red-600 mt-1">{actionErrByStep[i]}</p>}
               </div>
             </div>
             <div className="px-3 pb-3">
