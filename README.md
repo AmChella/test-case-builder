@@ -446,7 +446,7 @@ To reset all test data:
 
 ## Future Enhancements
 
-- [ ] Test execution integration with Playwright/Cypress
+- [.] Test execution integration with Playwright/Cypress
 - [ ] Test case templates and snippets
 - [ ] Test suite organization with folders/tags
 - [ ] User authentication and workspace isolation
