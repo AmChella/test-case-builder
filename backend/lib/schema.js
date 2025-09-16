@@ -5,6 +5,7 @@ const schema = {
   type: 'object',
   properties: {
     description: { type: 'string' },
+    product: { type: 'string' },
     testOrder: { type: 'number' },
     enabled: { type: 'boolean' },
     testSteps: {

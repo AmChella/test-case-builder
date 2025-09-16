@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createTestcases, updateTestcase } from '../api';
 import { useToast } from './ToastProvider';
 import { useLogger } from './LoggerProvider';
@@ -6,8 +6,9 @@ import { useLogger } from './LoggerProvider';
 const emptyStep = () => ({ stepName: '', action: 'goto', path: '', selector: '', selectorType: 'css', data: '', waitTime: 0, iterate: false, customName: '', soft: false, validations: [] });
 const emptyValidation = () => ({ type: 'toBeVisible', selector: '', selectorType: 'css', path: '', data: '', message: '', soft: false, attribute: '', cssProperty: '' });
 
-export default function TestCaseForm({ existing, onSaved }) {
-  const [data, setData] = useState({ description: '', enabled: true, testSteps: [], testOrder: null });
+export default function TestCaseForm({ existing, onSaved, defaultProduct = 'General' }) {
+  const [viewMode, setViewMode] = useState('form'); // 'form' | 'json'
+  const [data, setData] = useState({ description: '', enabled: true, testSteps: [], testOrder: 0, product: defaultProduct });
   const [errors, setErrors] = useState([]);
   const toast = useToast();
   const logger = useLogger();
@@ -26,8 +27,8 @@ export default function TestCaseForm({ existing, onSaved }) {
   const selectorRequiredFor = new Set(['toBeVisible','toBeHidden','toHaveText','toHaveValue','toHaveAttribute','toHaveCSS','toHaveClass']);
 
   useEffect(() => {
-    if (existing) setData(existing); else setData({ description: '', enabled: true, testSteps: [], testOrder: null });
-  }, [existing]);
+    if (existing) setData(existing); else setData({ description: '', enabled: true, testSteps: [], testOrder: 0, product: defaultProduct });
+  }, [existing, defaultProduct]);
 
   // Keep UI mode and JSON text in sync with current steps
   useEffect(() => {
@@ -73,7 +74,8 @@ export default function TestCaseForm({ existing, onSaved }) {
     Object.values(jsonErrByStep || {}).forEach((msg) => { if (msg) errs.push('Fix JSON errors in step data before saving.'); });
     Object.values(actionErrByStep || {}).forEach((msg) => { if (msg) errs.push('Fix JSON errors in action options before saving.'); });
     Object.values(filesErrByStep || {}).forEach((msg) => { if (msg) errs.push('Fix JSON errors in upload files before saving.'); });
-    if (!d.description?.trim()) errs.push('Description is required.');
+  if (!d.description?.trim()) errs.push('Description is required.');
+  if (!d.product?.trim()) errs.push('Product is required.');
     if (!Array.isArray(d.testSteps) || d.testSteps.length === 0) errs.push('At least one step is required.');
     d.testSteps.forEach((s, i) => {
       if (!s.action) errs.push(`Step ${i + 1}: action is required.`);
@@ -120,8 +122,109 @@ export default function TestCaseForm({ existing, onSaved }) {
     }
   }
 
+  // JSON Tree Viewer components
+  function JsonTree({ value, path = '$', depth = 0, expanded, toggle }) {
+    const isObj = value && typeof value === 'object';
+    const isArr = Array.isArray(value);
+    const isCollapsible = isObj;
+    const open = expanded.has(path);
+    const indentStyle = { marginLeft: depth ? 16 : 0 };
+
+    if (!isCollapsible) {
+      return (
+        <div style={indentStyle} className="text-xs text-gray-700 break-all">
+          {typeof value === 'string' ? '"' + value + '"' : String(value)}
+        </div>
+      );
+    }
+
+    const entries = isArr ? value.map((v, i) => [i, v]) : Object.entries(value);
+    return (
+      <div style={indentStyle} className="text-xs">
+        <button type="button" className="icon-btn icon-muted icon-btn-sm" onClick={() => toggle(path)} aria-label={open ? 'Collapse' : 'Expand'}>
+          <span className="mi">{open ? 'remove' : 'add'}</span>
+        </button>
+        <span className="ml-2 text-gray-800 align-middle">
+          {isArr ? '[' : '{'} {entries.length} {isArr ? (entries.length === 1 ? 'item' : 'items') : (entries.length === 1 ? 'key' : 'keys')} {isArr ? ']' : '}'}
+        </span>
+        {open && (
+          <div className="mt-1">
+            {entries.map(([k, v]) => {
+              const childPath = `${path}.${String(k)}`;
+              const childIsObj = v && typeof v === 'object';
+              return (
+                <div key={childPath} className="mt-0.5">
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-[160px] text-gray-600 break-all">
+                      {isArr ? <span className="text-gray-500">[{String(k)}]</span> : <span>{String(k)}:</span>}
+                    </div>
+                    <div className="flex-1">
+                      {childIsObj ? (
+                        <JsonTree value={v} path={childPath} depth={depth + 1} expanded={expanded} toggle={toggle} />
+                      ) : (
+                        <div className="text-gray-700 break-all">{typeof v === 'string' ? '"' + v + '"' : String(v)}</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function JsonViewer() {
+    const [expanded, setExpanded] = useState(new Set(['$']));
+    const toggle = (key) => setExpanded(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+    const expandAll = () => {
+      const keys = new Set(['$']);
+      const walk = (val, p) => {
+        if (val && typeof val === 'object') {
+          keys.add(p);
+          if (Array.isArray(val)) val.forEach((v, i) => walk(v, `${p}.${i}`));
+          else Object.entries(val).forEach(([k, v]) => walk(v, `${p}.${k}`));
+        }
+      };
+      walk(data, '$');
+      setExpanded(keys);
+    };
+    const collapseAll = () => setExpanded(new Set(['$']));
+    const jsonText = useMemo(() => JSON.stringify(data, null, 2), [data]);
+
+    return (
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <button type="button" className="icon-btn icon-muted" onClick={expandAll} title="Expand all" aria-label="Expand all"><span className="mi">unfold_more</span><span>Expand</span></button>
+          <button type="button" className="icon-btn icon-muted" onClick={collapseAll} title="Collapse all" aria-label="Collapse all"><span className="mi">unfold_less</span><span>Collapse</span></button>
+          <button type="button" className="icon-btn icon-primary" title="Copy JSON" aria-label="Copy JSON" onClick={() => navigator.clipboard?.writeText(jsonText)}><span className="mi">content_copy</span><span>Copy</span></button>
+          <button type="button" className="icon-btn icon-success" title="Download JSON" aria-label="Download JSON" onClick={() => { const blob = new Blob([jsonText], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = (existing?.filename || 'testcase') + '.json'; a.click(); URL.revokeObjectURL(url); }}><span className="mi">download</span><span>Download</span></button>
+          <div className="ml-auto">
+            <button onClick={save} className="icon-btn icon-success" title="Save" aria-label="Save"><span className="mi">save</span><span>Save</span></button>
+          </div>
+        </div>
+        <div className="border rounded bg-white p-3 max-h-[65vh] overflow-auto">
+          <JsonTree value={data} expanded={expanded} toggle={toggle} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 border rounded bg-white">
+      {/* Top toolbar: switch between Form and JSON views */}
+      <div className="mb-3 flex items-center gap-2">
+        <div className="ml-auto rounded border overflow-hidden" role="tablist" aria-label="View mode">
+          <button type="button" className={`icon-btn icon-muted ${viewMode === 'form' ? 'icon-indigo' : ''}`} onClick={() => setViewMode('form')}><span className="mi">edit_note</span><span>Form</span></button>
+          <button type="button" className={`icon-btn icon-muted ${viewMode === 'json' ? 'icon-indigo' : ''}`} onClick={() => setViewMode('json')}><span className="mi">code</span><span>JSON</span></button>
+        </div>
+      </div>
+
+      {viewMode === 'json' ? (
+        <JsonViewer />
+      ) : (
+        <>
       {!!errors.length && (
         <div className="mb-3 p-2 border border-red-300 bg-red-50 text-red-700 rounded">
           <ul className="list-disc pl-5">
@@ -130,12 +233,16 @@ export default function TestCaseForm({ existing, onSaved }) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <div className="md:col-span-2">
           <label className="block text-sm font-medium">Description <span className="text-red-600">*</span></label>
           <input aria-required="true" className="w-full px-3 py-2 border rounded" value={data.description} onChange={e => setData({ ...data, description: e.target.value })} placeholder="Short description of the test case" />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-sm font-medium">Product <span className="text-red-600">*</span></label>
+          <input aria-required="true" className="w-full px-3 py-2 border rounded" value={data.product || ''} onChange={e => setData({ ...data, product: e.target.value })} placeholder="e.g., Web, Mobile, API" />
+        </div>
+        <div className="grid grid-cols-2 gap-3 md:col-span-1">
           <div>
             <label className="block text-sm font-medium">Test Order</label>
             <input className="w-full px-3 py-2 border rounded" type="number" value={data.testOrder ?? ''} onChange={e => setData({ ...data, testOrder: e.target.value === '' ? null : Number(e.target.value) })} />
@@ -448,8 +555,10 @@ export default function TestCaseForm({ existing, onSaved }) {
       </div>
 
     <div className="mt-4">
-  <button onClick={save} className="icon-btn icon-success" title="Save" aria-label="Save"><span className="mi">save</span></button>
+      <button onClick={save} className="icon-btn icon-success" title="Save" aria-label="Save"><span className="mi">save</span></button>
     </div>
+        </>
+      )}
     </div>
   );
 }

@@ -5,15 +5,17 @@ import { useLogger } from './LoggerProvider';
 
 const emptyStep = () => ({ stepName: '', action: 'goto', path: '', selector: '', selectorType: 'css', data: '', waitTime: 0, iterate: false, customName: '', soft: false, validations: [] });
 const emptyValidation = () => ({ type: 'toBeVisible', selector: '', selectorType: 'css', path: '', data: '', message: '', soft: false, attribute: '', cssProperty: '' });
-const emptyCase = () => ({ description: '', enabled: true, testSteps: [emptyStep()], testOrder: null });
+const emptyCase = (product = 'General') => ({ description: '', enabled: true, testSteps: [emptyStep()], testOrder: null, product });
 
-export default function BatchCreate({ onSaved }) {
-  const [drafts, setDrafts] = useState([emptyCase()]);
+export default function BatchCreate({ onSaved, defaultProduct = 'General' }) {
+  const [drafts, setDrafts] = useState([emptyCase(defaultProduct)]);
   const [errors, setErrors] = useState([]);
   const [existingOrders, setExistingOrders] = useState(new Set());
+  const [existingOrdersByProduct, setExistingOrdersByProduct] = useState(new Map());
   const [openIndex, setOpenIndex] = useState(0); // accordion: only one open
   const toast = useToast();
   const logger = useLogger();
+  const [viewMode, setViewMode] = useState('form'); // 'form' | 'json'
   // UI-only: track per-step data mode and raw JSON text/errors
   const [dataMode, setDataMode] = useState({}); // { `${di}:${si}`: 'text'|'json' }
   const [jsonText, setJsonText] = useState({}); // { `${di}:${si}`: string }
@@ -29,11 +31,18 @@ export default function BatchCreate({ onSaved }) {
         const all = await fetchTestcases();
         const set = new Set(all.map(x => x.testOrder).filter(v => Number.isInteger(v)));
         setExistingOrders(set);
+        const byProd = new Map();
+        for (const x of all) {
+          const p = x.product || 'General';
+          if (!byProd.has(p)) byProd.set(p, new Set());
+          if (Number.isInteger(x.testOrder)) byProd.get(p).add(x.testOrder);
+        }
+        setExistingOrdersByProduct(byProd);
       } catch {}
     })();
   }, []);
 
-  const addDraft = () => setDrafts(ds => { const next = [...ds, emptyCase()]; setOpenIndex(next.length - 1); return next; });
+  const addDraft = () => setDrafts(ds => { const next = [...ds, emptyCase(defaultProduct)]; setOpenIndex(next.length - 1); return next; });
   const removeDraft = (i) => setDrafts(ds => {
     const next = ds.filter((_, idx) => idx !== i);
     // adjust open index
@@ -61,14 +70,20 @@ export default function BatchCreate({ onSaved }) {
     Object.values(jsonErr || {}).forEach((msg) => { if (msg) errs.push('Fix JSON errors in step data before saving.'); });
     Object.values(actionErr || {}).forEach((msg) => { if (msg) errs.push('Fix JSON errors in action options before saving.'); });
     Object.values(filesErr || {}).forEach((msg) => { if (msg) errs.push('Fix JSON errors in upload files before saving.'); });
-    // duplicate orders within batch
-    const counts = new Map();
-    list.forEach(d => { if (Number.isInteger(d.testOrder)) counts.set(d.testOrder, (counts.get(d.testOrder) || 0) + 1); });
-    const dups = [...counts.entries()].filter(([, c]) => c > 1).map(([val]) => val);
-    if (dups.length) errs.push(`Duplicate testOrder in batch: ${dups.join(', ')}`);
+    // duplicate orders within batch per product
+    const counts = new Map(); // key: product:order
+    list.forEach(d => {
+      if (Number.isInteger(d.testOrder)) {
+        const key = `${d.product || 'General'}:${d.testOrder}`;
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }
+    });
+    const dups = [...counts.entries()].filter(([, c]) => c > 1).map(([key]) => key);
+    if (dups.length) errs.push(`Duplicate testOrder in batch (per product): ${dups.join(', ')}`);
     list.forEach((d, di) => {
       if (!d.description?.trim()) errs.push(`Case ${di + 1}: description is required.`);
       if (!Array.isArray(d.testSteps) || d.testSteps.length === 0) errs.push(`Case ${di + 1}: at least one step is required.`);
+      if (!d.product?.trim()) errs.push(`Case ${di + 1}: product is required.`);
       d.testSteps.forEach((s, i) => {
         if (!s.action) errs.push(`Case ${di + 1} - Step ${i + 1}: action is required.`);
         if (s.action === 'goto' && !(s.path && s.path.toString().length)) errs.push(`Case ${di + 1} - Step ${i + 1}: path is required for goto.`);
@@ -96,13 +111,13 @@ export default function BatchCreate({ onSaved }) {
       const localErrors = clientValidateAll(drafts);
       setErrors(localErrors);
       if (localErrors.length) return;
-      // conflicts against existing orders
+      // conflicts against existing orders per product
       const conflicts = drafts
-        .filter(d => Number.isInteger(d.testOrder) && existingOrders.has(d.testOrder))
-        .map(d => d.testOrder);
+        .filter(d => Number.isInteger(d.testOrder) && (existingOrdersByProduct.get(d.product || 'General') || new Set()).has(d.testOrder))
+        .map(d => `${d.product || 'General'}:${d.testOrder}`);
       if (conflicts.length) {
         const uniq = [...new Set(conflicts)];
-        const msgs = [`Conflicts with existing testOrder: ${uniq.join(', ')}`];
+        const msgs = [`Conflicts with existing testOrder (per product): ${uniq.join(', ')}`];
         setErrors(prev => [...prev, ...msgs]);
         return;
       }
@@ -120,14 +135,38 @@ export default function BatchCreate({ onSaved }) {
   }
 
   // compute duplicates for inline highlighting
-  const dupSet = useMemo(() => {
+  const dupKeySet = useMemo(() => {
     const c = new Map();
-    drafts.forEach(d => { if (Number.isInteger(d.testOrder)) c.set(d.testOrder, (c.get(d.testOrder) || 0) + 1); });
+    drafts.forEach(d => {
+      if (Number.isInteger(d.testOrder)) {
+        const key = `${d.product || 'General'}:${d.testOrder}`;
+        c.set(key, (c.get(key) || 0) + 1);
+      }
+    });
     return new Set([...c.entries()].filter(([, n]) => n > 1).map(([k]) => k));
   }, [drafts]);
 
   return (
     <div>
+      {/* Toolbar: toggle view */}
+      <div className="mb-3 flex items-center gap-2">
+        <div className="ml-auto rounded border overflow-hidden" role="tablist" aria-label="View mode">
+          <button type="button" className={`icon-btn icon-muted ${viewMode === 'form' ? 'icon-indigo' : ''}`} onClick={() => setViewMode('form')}><span className="mi">edit_note</span><span>Form</span></button>
+          <button type="button" className={`icon-btn icon-muted ${viewMode === 'json' ? 'icon-indigo' : ''}`} onClick={() => setViewMode('json')}><span className="mi">code</span><span>JSON</span></button>
+        </div>
+      </div>
+
+      {viewMode === 'json' ? (
+        <div className="border rounded bg-white p-3 max-h-[65vh] overflow-auto">
+          <pre className="text-xs"><code>{JSON.stringify(drafts, null, 2)}</code></pre>
+          <div className="mt-2 flex items-center gap-2">
+            <button type="button" className="icon-btn icon-primary" title="Copy JSON" aria-label="Copy JSON" onClick={() => navigator.clipboard?.writeText(JSON.stringify(drafts, null, 2))}><span className="mi">content_copy</span><span>Copy</span></button>
+            <button type="button" className="icon-btn icon-success" title="Download JSON" aria-label="Download JSON" onClick={() => { const blob = new Blob([JSON.stringify(drafts, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'test-cases.json'; a.click(); URL.revokeObjectURL(url); }}><span className="mi">download</span><span>Download</span></button>
+            <div className="ml-auto"><button onClick={saveAll} className="icon-btn icon-success" title="Save all" aria-label="Save all"><span className="mi">save</span><span>Save</span></button></div>
+          </div>
+        </div>
+      ) : (
+        <>
       {!!errors.length && (
         <div className="mb-3 p-2 border border-red-300 bg-red-50 text-red-700 rounded">
           <ul className="list-disc pl-5">
@@ -153,19 +192,23 @@ export default function BatchCreate({ onSaved }) {
             </button>
             {isOpen && (
               <div className="px-3 pb-3 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium">Description <span className="text-red-600">*</span></label>
                 <input required className="w-full px-3 py-2 border rounded" value={d.description} onChange={e => changeDraft(di, { description: e.target.value })} placeholder="Short description" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium">Product <span className="text-red-600">*</span></label>
+                <input required className="w-full px-3 py-2 border rounded" value={d.product || ''} onChange={e => changeDraft(di, { product: e.target.value })} placeholder="e.g., Web, Mobile, API" />
+              </div>
+              <div className="grid grid-cols-2 gap-3 md:col-span-1">
                 <div>
                   <label className="block text-sm font-medium">Test Order</label>
-                  <input className={`w-full px-3 py-2 border rounded ${Number.isInteger(d.testOrder) && (dupSet.has(d.testOrder) ? 'border-red-500' : (existingOrders.has(d.testOrder) ? 'border-red-500' : ''))}`} type="number" value={d.testOrder ?? ''} onChange={e => changeDraft(di, { testOrder: e.target.value === '' ? null : Number(e.target.value) })} />
-                  {Number.isInteger(d.testOrder) && dupSet.has(d.testOrder) && (
+                  <input className={`w-full px-3 py-2 border rounded ${Number.isInteger(d.testOrder) && (dupKeySet.has(`${d.product || 'General'}:${d.testOrder}`) ? 'border-red-500' : ((existingOrdersByProduct.get(d.product || 'General') || new Set()).has(d.testOrder) ? 'border-red-500' : ''))}`} type="number" value={d.testOrder ?? ''} onChange={e => changeDraft(di, { testOrder: e.target.value === '' ? null : Number(e.target.value) })} />
+                  {Number.isInteger(d.testOrder) && dupKeySet.has(`${d.product || 'General'}:${d.testOrder}`) && (
                     <p className="text-xs text-red-600 mt-1">Duplicate order within batch.</p>
                   )}
-                  {Number.isInteger(d.testOrder) && !dupSet.has(d.testOrder) && existingOrders.has(d.testOrder) && (
+                  {Number.isInteger(d.testOrder) && !dupKeySet.has(`${d.product || 'General'}:${d.testOrder}`) && (existingOrdersByProduct.get(d.product || 'General') || new Set()).has(d.testOrder) && (
                     <p className="text-xs text-red-600 mt-1">Conflicts with existing test case.</p>
                   )}
                 </div>
@@ -448,9 +491,11 @@ export default function BatchCreate({ onSaved }) {
       })}
 
       <div className="flex items-center gap-2">
-  <button className="icon-btn icon-add" onClick={addDraft} title="Add test case" aria-label="Add test case"><span className="mi">add</span> Test Case</button>
-  <button className="icon-btn icon-success" onClick={saveAll} title="Save all" aria-label="Save all"><span className="mi">save</span> Save All</button>
+        <button className="icon-btn icon-add" onClick={addDraft} title="Add test case" aria-label="Add test case"><span className="mi">add</span> Test Case</button>
+        <button className="icon-btn icon-success" onClick={saveAll} title="Save all" aria-label="Save all"><span className="mi">save</span> Save All</button>
       </div>
+        </>
+      )}
     </div>
   );
 }
