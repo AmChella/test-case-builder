@@ -121,11 +121,11 @@ export default function BatchCreate({ onSaved, defaultProduct = 'General' }) {
         setErrors(prev => [...prev, ...msgs]);
         return;
       }
-      await createTestcases(drafts);
+    await createTestcases(drafts);
   toast.success('Saved all test cases');
       logger.info('Batch saved', { count: drafts.length });
       onSaved && onSaved();
-      setDrafts([emptyCase()]);
+    setDrafts([emptyCase(defaultProduct)]);
     } catch (err) {
       const msg = err?.response?.data?.error || err.message;
       setErrors(prev => [...prev, msg]);
@@ -439,9 +439,13 @@ export default function BatchCreate({ onSaved, defaultProduct = 'General' }) {
                           <option value="testId">testId</option>
                         </select>
                         <input className="w-full px-2 py-1 border rounded" placeholder="path (optional)" value={v.path || ''} onChange={e => changeValidation(di, si, vi, { path: e.target.value })} />
-                        {expectsData(v.type) && (
-                          <input className="w-full px-2 py-1 border rounded" placeholder={v.type === 'toHaveText' ? 'expected text' : 'data'} value={v.data || ''} onChange={e => changeValidation(di, si, vi, { data: e.target.value })} />
-                        )}
+                        <input
+                          className="w-full px-2 py-1 border rounded"
+                          placeholder={v.type === 'toHaveText' ? 'expected text' : 'data (optional)'}
+                          aria-required={expectsData(v.type) ? 'true' : 'false'}
+                          value={v.data || ''}
+                          onChange={e => changeValidation(di, si, vi, { data: e.target.value })}
+                        />
                         <input className="w-full px-2 py-1 border rounded" placeholder="attribute (optional)" value={v.attribute || ''} onChange={e => changeValidation(di, si, vi, { attribute: e.target.value })} />
                         <input className="w-full px-2 py-1 border rounded" placeholder="css property (optional)" value={v.cssProperty || ''} onChange={e => changeValidation(di, si, vi, { cssProperty: e.target.value })} />
                         <input className="w-full px-2 py-1 border rounded" placeholder="message" value={v.message || ''} onChange={e => changeValidation(di, si, vi, { message: e.target.value })} />
@@ -479,7 +483,43 @@ export default function BatchCreate({ onSaved, defaultProduct = 'General' }) {
                     {actionErr[`${di}:${si}`] && <p className="text-xs text-red-600 mt-1">{actionErr[`${di}:${si}`]}</p>}
                   </div>
 
-                  <button title="Remove step" aria-label="Remove step" className="icon-btn icon-danger text-sm md:col-span-6" onClick={() => removeStep(di, si)}><span className="mi">delete</span> Remove Step</button>
+                  <div className="flex gap-2 md:col-span-6">
+                    <button title="Move step up" aria-label="Move step up" className="icon-btn icon-muted" disabled={si === 0} onClick={() => {
+                      if (si === 0) return;
+                      setDrafts(ds => {
+                        const n = [...ds];
+                        const steps = [...n[di].testSteps];
+                        const tmp = steps[si - 1];
+                        steps[si - 1] = steps[si];
+                        steps[si] = tmp;
+                        n[di] = { ...n[di], testSteps: steps };
+                        return n;
+                      });
+                    }}><span className="mi">arrow_upward</span></button>
+                    <button title="Move step down" aria-label="Move step down" className="icon-btn icon-muted" disabled={si === drafts[di].testSteps.length - 1} onClick={() => {
+                      setDrafts(ds => {
+                        const n = [...ds];
+                        if (si === n[di].testSteps.length - 1) return n;
+                        const steps = [...n[di].testSteps];
+                        const tmp = steps[si + 1];
+                        steps[si + 1] = steps[si];
+                        steps[si] = tmp;
+                        n[di] = { ...n[di], testSteps: steps };
+                        return n;
+                      });
+                    }}><span className="mi">arrow_downward</span></button>
+                    <button title="Duplicate step" aria-label="Duplicate step" className="icon-btn icon-add" onClick={() => {
+                      setDrafts(ds => {
+                        const n = [...ds];
+                        const steps = [...n[di].testSteps];
+                        const clone = { ...steps[si], validations: steps[si].validations ? JSON.parse(JSON.stringify(steps[si].validations)) : [], data: typeof steps[si].data === 'object' ? JSON.parse(JSON.stringify(steps[si].data)) : steps[si].data };
+                        steps.splice(si + 1, 0, clone);
+                        n[di] = { ...n[di], testSteps: steps };
+                        return n;
+                      });
+                    }}><span className="mi">content_copy</span></button>
+                    <button title="Remove step" aria-label="Remove step" className="icon-btn icon-danger" onClick={() => removeStep(di, si)}><span className="mi">delete</span></button>
+                  </div>
                 </div>
               ))}
               <button className="icon-btn icon-add" onClick={() => addStep(di)} title="Add step" aria-label="Add step"><span className="mi">add</span> Step</button>

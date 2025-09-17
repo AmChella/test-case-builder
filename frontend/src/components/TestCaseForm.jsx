@@ -270,6 +270,9 @@ export default function TestCaseForm({ existing, onSaved, defaultProduct = 'Gene
             <summary className="px-3 py-2 cursor-pointer flex items-center gap-2">
               <span className="text-sm inline-block px-1.5 py-0.5 rounded bg-blue-100 border">Step {i + 1}</span>
               <span className="font-medium flex-1 truncate">{s.stepName || '(unnamed step)'}</span>
+              <button type="button" title="Move step up" aria-label="Move step up" className="icon-btn icon-muted" disabled={i === 0} onClick={(e) => { e.preventDefault(); setData(d => { if (i === 0) return d; const steps = [...d.testSteps]; const tmp = steps[i - 1]; steps[i - 1] = steps[i]; steps[i] = tmp; return { ...d, testSteps: steps }; }); }}><span className="mi">arrow_upward</span></button>
+              <button type="button" title="Move step down" aria-label="Move step down" className="icon-btn icon-muted" disabled={i === data.testSteps.length - 1} onClick={(e) => { e.preventDefault(); setData(d => { if (i === d.testSteps.length - 1) return d; const steps = [...d.testSteps]; const tmp = steps[i + 1]; steps[i + 1] = steps[i]; steps[i] = tmp; return { ...d, testSteps: steps }; }); }}><span className="mi">arrow_downward</span></button>
+              <button type="button" title="Duplicate step" aria-label="Duplicate step" className="icon-btn icon-add" onClick={(e) => { e.preventDefault(); setData(d => { const steps = [...d.testSteps]; const clone = { ...steps[i], validations: steps[i].validations ? JSON.parse(JSON.stringify(steps[i].validations)) : [], data: typeof steps[i].data === 'object' ? JSON.parse(JSON.stringify(steps[i].data)) : steps[i].data }; steps.splice(i + 1, 0, clone); return { ...d, testSteps: steps }; }); }}><span className="mi">content_copy</span></button>
               <button type="button" title="Remove step" aria-label="Remove step" className="icon-btn icon-danger" onClick={(e) => { e.preventDefault(); removeStep(i); }}><span className="mi">delete</span></button>
             </summary>
             <div className="px-3 pb-3 grid grid-cols-1 md:grid-cols-6 gap-2">
@@ -514,12 +517,16 @@ export default function TestCaseForm({ existing, onSaved, defaultProduct = 'Gene
                     <label className="block text-sm">Path (optional)</label>
                     <input className="w-full px-2 py-1 border rounded" placeholder="path" value={v.path || ''} onChange={e => changeValidation(i, vi, { path: e.target.value })} />
                   </div>
-                  {expectsData(v.type) && (
-                    <div>
-                      <label className="block text-sm">Data <span className="text-red-600">*</span></label>
-                      <input aria-required="true" className="w-full px-2 py-1 border rounded" placeholder={v.type === 'toHaveText' ? 'expected text' : 'data'} value={v.data || ''} onChange={e => changeValidation(i, vi, { data: e.target.value })} />
-                    </div>
-                  )}
+                  <div>
+                    <label className="block text-sm">Data {expectsData(v.type) && <span className="text-red-600">*</span>}</label>
+                    <input
+                      aria-required={expectsData(v.type) ? 'true' : 'false'}
+                      className="w-full px-2 py-1 border rounded"
+                      placeholder={v.type === 'toHaveText' ? 'expected text' : 'data (optional)'}
+                      value={v.data || ''}
+                      onChange={e => changeValidation(i, vi, { data: e.target.value })}
+                    />
+                  </div>
                   <div>
                     <label className="block text-sm">Message</label>
                     <input className="w-full px-2 py-1 border rounded" placeholder="message" value={v.message || ''} onChange={e => changeValidation(i, vi, { message: e.target.value })} />
