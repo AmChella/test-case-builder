@@ -16,14 +16,24 @@ async function connect() {
 const TestStepSchema = new mongoose.Schema({}, { strict: false, _id: false });
 const ValidationSchema = new mongoose.Schema({}, { strict: false, _id: false });
 
+const ProductSchema = new mongoose.Schema({
+  name: { type: String, required: true, unique: true, index: true },
+  description: { type: String },
+}, { timestamps: true });
+
 const TestCaseSchema = new mongoose.Schema({
   filename: { type: String, required: true, unique: true, index: true },
   description: { type: String, required: true },
   enabled: { type: Boolean, default: true },
+  product: { type: String, default: 'General', index: true },
   testOrder: { type: Number, required: true, index: true },
   testSteps: { type: [TestStepSchema], default: [] },
 }, { timestamps: true });
 
-const TestCase = mongoose.models.TestCase || mongoose.model('TestCase', TestCaseSchema);
+// Enforce uniqueness of testOrder within a product
+TestCaseSchema.index({ product: 1, testOrder: 1 }, { unique: true });
 
-module.exports = { connect, TestCase };
+const TestCase = mongoose.models.TestCase || mongoose.model('TestCase', TestCaseSchema);
+const Product = mongoose.models.Product || mongoose.model('Product', ProductSchema);
+
+module.exports = { connect, TestCase, Product };
