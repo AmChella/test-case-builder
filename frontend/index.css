@@ -28,13 +28,10 @@ input[type="tel"],
 select,
 textarea { font-size: 14px; }
 
-/* Linux (Ubuntu) browser select dropdown positioning fixes */
-/* Avoid ancestor transform clipping affecting native <select> portal positioning */
-body * { -webkit-transform: translateZ(0); transform: translateZ(0); }
-select { position: relative; background-color:#fff; }
-select:focus { outline:2px solid #6366f1; outline-offset:1px; }
-/* Force a higher stacking context so dropdown isn't hidden behind other layers */
-select { z-index: 10; }
+/* Scoped Ubuntu/Linux select dropdown positioning fix */
+.form-select-fix select.app-select { position: relative; z-index: 10; background:#fff; }
+.form-select-fix select.app-select:focus { outline:2px solid #6366f1; outline-offset:1px; }
+.app-select { font-size:14px; -webkit-appearance: menulist; appearance: menulist; }
 
 h1, h2, h3 { font-weight: 600; color: #111827; }
 h4, h5 { font-weight: 500; color: #1f2937; }

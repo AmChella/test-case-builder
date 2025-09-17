@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import AppSelect from './ui/AppSelect';
 import { createTestcases, fetchTestcases } from '../api';
 import { useToast } from './ToastProvider';
 import { useLogger } from './LoggerProvider';
@@ -238,17 +239,15 @@ export default function BatchCreate({ onSaved, defaultProduct = 'General' }) {
                   </div>
                   <div>
                     <label className="block text-sm">Action <span className="text-red-600">*</span></label>
-                    <select className="w-full px-2 py-1 border rounded" value={s.action} onChange={e => changeStep(di, si, { action: e.target.value })}>
-                      <option value="goto">goto</option>
-                      <option value="click">click</option>
-                      <option value="fill">fill</option>
-                      <option value="type">type</option>
-                      <option value="press">press</option>
-                      <option value="hover">hover</option>
-                      <option value="upload">upload</option>
-                      <option value="waitForTimeout">waitForTimeout</option>
-                      <option value="custom">custom</option>
-                    </select>
+                    <AppSelect
+                      label="Action"
+                      required
+                      className="!space-y-0"
+                      selectClassName="h-[34px]"
+                      value={s.action}
+                      onChange={e => changeStep(di, si, { action: e.target.value })}
+                      options={['goto','click','fill','type','press','hover','upload','waitForTimeout','custom']}
+                    />
                   </div>
                   <div>
                     <label className="block text-sm">Selector / Path {(s.action === 'goto' || ['click','hover','fill','type','press'].includes(s.action)) && <span className="text-red-600">*</span>}</label>
@@ -256,13 +255,14 @@ export default function BatchCreate({ onSaved, defaultProduct = 'General' }) {
                   </div>
                   <div>
                     <label className="block text-sm">Selector Type</label>
-                    <select className="w-full px-2 py-1 border rounded" value={s.selectorType || 'css'} onChange={e => changeStep(di, si, { selectorType: e.target.value })}>
-                      <option value="css">css</option>
-                      <option value="xpath">xpath</option>
-                      <option value="id">id</option>
-                      <option value="text">text</option>
-                      <option value="testId">testId</option>
-                    </select>
+                    <AppSelect
+                      label="Selector Type"
+                      className="!space-y-0"
+                      selectClassName="h-[34px]"
+                      value={s.selectorType || 'css'}
+                      onChange={e => changeStep(di, si, { selectorType: e.target.value })}
+                      options={['css','xpath','id','text','testId']}
+                    />
                   </div>
                   <div>
                     <label className="block text-sm">Nth (optional)</label>
@@ -417,27 +417,25 @@ export default function BatchCreate({ onSaved, defaultProduct = 'General' }) {
                     </div>
                     {(s.validations || []).map((v, vi) => (
                       <div key={vi} className="mt-2 grid grid-cols-1 md:grid-cols-5 gap-2 bg-amber-50/60 p-2 rounded border">
-                        <select className="w-full px-2 py-1 border rounded" value={v.type || ''} onChange={e => changeValidation(di, si, vi, { type: e.target.value })}>
-                          <option value="">Select type…</option>
-                          <option value="toBeVisible">toBeVisible</option>
-                          <option value="toBeHidden">toBeHidden</option>
-                          <option value="toHaveTitle">toHaveTitle</option>
-                          <option value="toHaveURL">toHaveURL</option>
-                          <option value="toHaveText">toHaveText</option>
-                          <option value="toHaveValue">toHaveValue</option>
-                          <option value="toHaveAttribute">toHaveAttribute</option>
-                          <option value="toHaveCSS">toHaveCSS</option>
-                          <option value="toHaveClass">toHaveClass</option>
-                          <option value="custom">custom</option>
-                        </select>
+                        <AppSelect
+                          label="Type"
+                          required
+                          className="!space-y-0"
+                          selectClassName="h-[34px]"
+                          value={v.type || ''}
+                          placeholder="Select type…"
+                          onChange={e => changeValidation(di, si, vi, { type: e.target.value })}
+                          options={['toBeVisible','toBeHidden','toHaveTitle','toHaveURL','toHaveText','toHaveValue','toHaveAttribute','toHaveCSS','toHaveClass','custom']}
+                        />
                         <input className="w-full px-2 py-1 border rounded" placeholder="selector" value={v.selector || ''} onChange={e => changeValidation(di, si, vi, { selector: e.target.value })} />
-                        <select className="w-full px-2 py-1 border rounded" value={v.selectorType || 'css'} onChange={e => changeValidation(di, si, vi, { selectorType: e.target.value })}>
-                          <option value="css">css</option>
-                          <option value="xpath">xpath</option>
-                          <option value="id">id</option>
-                          <option value="text">text</option>
-                          <option value="testId">testId</option>
-                        </select>
+                        <AppSelect
+                          label="Selector Type"
+                          className="!space-y-0"
+                          selectClassName="h-[34px]"
+                          value={v.selectorType || 'css'}
+                          onChange={e => changeValidation(di, si, vi, { selectorType: e.target.value })}
+                          options={['css','xpath','id','text','testId']}
+                        />
                         <input className="w-full px-2 py-1 border rounded" placeholder="path (optional)" value={v.path || ''} onChange={e => changeValidation(di, si, vi, { path: e.target.value })} />
                         <input
                           className="w-full px-2 py-1 border rounded"
