@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import AppSelect from './ui/AppSelect';
 import { createTestcases, updateTestcase } from '../api';
 import { useToast } from './ToastProvider';
 import { useLogger } from './LoggerProvider';
@@ -282,17 +283,16 @@ export default function TestCaseForm({ existing, onSaved, defaultProduct = 'Gene
               </div>
               <div>
                 <label className="block text-sm">Action <span className="text-red-600">*</span></label>
-                <select className="w-full px-2 py-1 border rounded" value={s.action} onChange={e => changeStep(i, { action: e.target.value })}>
-                  <option value="goto">goto</option>
-                  <option value="click">click</option>
-                  <option value="fill">fill</option>
-                  <option value="type">type</option>
-                  <option value="press">press</option>
-                  <option value="hover">hover</option>
-                  <option value="upload">upload</option>
-                  <option value="waitForTimeout">waitForTimeout</option>
-                  <option value="custom">custom</option>
-                </select>
+                <AppSelect
+                  label="Action"
+                  required
+                  className="!space-y-0"
+                  selectClassName="h-[34px]"
+                  value={s.action}
+                  onChange={e => changeStep(i, { action: e.target.value })}
+                  options={[ 'goto','click','fill','type','press','hover','upload','waitForTimeout','custom' ]}
+                  helper="Select the step action"
+                />
                 <p className="text-xs text-gray-500 mt-1">goto uses path; click/hover use selector; fill/type/press use selector + data; waitForTimeout uses waitTime; custom uses customName.</p>
               </div>
               <div>
@@ -301,13 +301,14 @@ export default function TestCaseForm({ existing, onSaved, defaultProduct = 'Gene
               </div>
               <div>
                 <label className="block text-sm">Selector Type</label>
-                <select className="w-full px-2 py-1 border rounded" value={s.selectorType || 'css'} onChange={e => changeStep(i, { selectorType: e.target.value })}>
-                  <option value="css">css</option>
-                  <option value="xpath">xpath</option>
-                  <option value="id">id</option>
-                  <option value="text">text</option>
-                  <option value="testId">testId</option>
-                </select>
+                <AppSelect
+                  label="Selector Type"
+                  className="!space-y-0"
+                  selectClassName="h-[34px]"
+                  value={s.selectorType || 'css'}
+                  onChange={e => changeStep(i, { selectorType: e.target.value })}
+                  options={['css','xpath','id','text','testId']}
+                />
               </div>
               <div>
                 <label className="block text-sm">Nth (optional)</label>
@@ -485,19 +486,16 @@ export default function TestCaseForm({ existing, onSaved, defaultProduct = 'Gene
                 <div key={vi} className="p-2 border rounded my-2 grid grid-cols-1 md:grid-cols-6 gap-2 bg-amber-50/60 border-l-4 border-amber-400">
                   <div>
                     <label className="block text-sm">Type <span className="text-red-600">*</span></label>
-                    <select className="w-full px-2 py-1 border rounded" value={v.type || ''} onChange={e => changeValidation(i, vi, { type: e.target.value })}>
-                      <option value="">Select type…</option>
-                      <option value="toBeVisible">toBeVisible</option>
-                      <option value="toBeHidden">toBeHidden</option>
-                      <option value="toHaveTitle">toHaveTitle</option>
-                      <option value="toHaveURL">toHaveURL</option>
-                      <option value="toHaveText">toHaveText</option>
-                      <option value="toHaveValue">toHaveValue</option>
-                      <option value="toHaveAttribute">toHaveAttribute</option>
-                      <option value="toHaveCSS">toHaveCSS</option>
-                      <option value="toHaveClass">toHaveClass</option>
-                      <option value="custom">custom</option>
-                    </select>
+                    <AppSelect
+                      label="Type"
+                      required
+                      className="!space-y-0"
+                      selectClassName="h-[34px]"
+                      value={v.type || ''}
+                      placeholder="Select type…"
+                      onChange={e => changeValidation(i, vi, { type: e.target.value })}
+                      options={['toBeVisible','toBeHidden','toHaveTitle','toHaveURL','toHaveText','toHaveValue','toHaveAttribute','toHaveCSS','toHaveClass','custom']}
+                    />
                   </div>
                   <div>
                     <label className="block text-sm">Selector</label>
@@ -505,13 +503,14 @@ export default function TestCaseForm({ existing, onSaved, defaultProduct = 'Gene
                   </div>
                   <div>
                     <label className="block text-sm">Selector Type</label>
-                    <select className="w-full px-2 py-1 border rounded" value={v.selectorType || 'css'} onChange={e => changeValidation(i, vi, { selectorType: e.target.value })}>
-                      <option value="css">css</option>
-                      <option value="xpath">xpath</option>
-                      <option value="id">id</option>
-                      <option value="text">text</option>
-                      <option value="testId">testId</option>
-                    </select>
+                    <AppSelect
+                      label="Selector Type"
+                      className="!space-y-0"
+                      selectClassName="h-[34px]"
+                      value={v.selectorType || 'css'}
+                      onChange={e => changeValidation(i, vi, { selectorType: e.target.value })}
+                      options={['css','xpath','id','text','testId']}
+                    />
                   </div>
                   <div>
                     <label className="block text-sm">Path (optional)</label>

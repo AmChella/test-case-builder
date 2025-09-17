@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import AppSelect from './ui/AppSelect';
 import { fetchTestcases, deleteTestcase, createTestcases, updateTestcase, runTest, fetchProducts, createProduct, deleteProduct } from '../api';
 import TestCaseForm from './TestCaseForm';
 import BatchCreate from './BatchCreate';
@@ -343,9 +344,15 @@ export default function Dashboard() {
         <div className="ml-auto flex items-center gap-2">
           {/* Product selector */}
           <div className="flex items-center gap-2">
-            <select className="px-2 py-1 border rounded bg-white" value={currentProduct} onChange={(e) => setCurrentProduct(e.target.value)} title="Filter by product" aria-label="Filter by product">
-              {products.map((p) => (<option key={p} value={p}>{p}</option>))}
-            </select>
+            <div className="min-w-[160px]">
+              <AppSelect
+                label={null}
+                value={currentProduct}
+                onChange={(e) => setCurrentProduct(e.target.value)}
+                options={products.map(p => ({ value: p, label: p }))}
+                aria-label="Filter by product"
+              />
+            </div>
             <button className="icon-btn icon-primary" title="Add product" aria-label="Add product" onClick={() => { setNewProductName(''); setNewProductDesc(''); setShowProductModal(true); }}><span className="mi">library_add</span></button>
             {currentProduct !== 'All' && currentProduct !== 'General' && (
               <button className="icon-btn icon-danger" title="Delete product" aria-label="Delete product" onClick={async () => {
@@ -550,7 +557,7 @@ export default function Dashboard() {
         )}
 
         {/* Editor column */}
-        <div className={sidebarOpen ? "md:col-span-2" : "md:col-span-3 relative"}>
+        <div className={sidebarOpen ? "md:col-span-2 form-select-fix" : "md:col-span-3 relative form-select-fix"}>
           <div className="bg-white border rounded p-4">
             {runResult && (
               <div className={`mb-4 border rounded ${runResult.ok ? 'border-emerald-300 bg-emerald-50' : 'border-red-300 bg-red-50'}`}>
