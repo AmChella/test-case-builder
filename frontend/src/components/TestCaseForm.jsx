@@ -282,7 +282,7 @@ export default function TestCaseForm({ existing, onSaved, defaultProduct = 'Gene
                 <input className="w-full px-2 py-1 border rounded" placeholder="stepName" value={s.stepName} onChange={e => changeStep(i, { stepName: e.target.value })} />
               </div>
               <div>
-                <label className="block text-sm">Action <span className="text-red-600">*</span></label>
+                {/* <label className="block text-sm">Action <span className="text-red-600">*</span></label> */}
                 <AppSelect
                   label="Action"
                   required
@@ -485,7 +485,7 @@ export default function TestCaseForm({ existing, onSaved, defaultProduct = 'Gene
               {(s.validations || []).map((v, vi) => (
                 <div key={vi} className="p-2 border rounded my-2 grid grid-cols-1 md:grid-cols-6 gap-2 bg-amber-50/60 border-l-4 border-amber-400">
                   <div>
-                    <label className="block text-sm">Type <span className="text-red-600">*</span></label>
+                    {/* <label className="block text-sm">Type <span className="text-red-600">*</span></label> */}
                     <AppSelect
                       label="Type"
                       required
