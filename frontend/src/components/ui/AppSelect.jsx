@@ -1,4 +1,5 @@
 import React from 'react';
+import CustomDropdown from './CustomDropdown';
 
 /**
  * Reusable select component with consistent styling and accessible labeling.
@@ -11,6 +12,7 @@ import React from 'react';
  *  - selectClassName?: extra classes for the <select>
  *  - options: Array<{ value: string|number, label: string } | string>
  */
+
 export default function AppSelect({
   id,
   label,
@@ -37,24 +39,21 @@ export default function AppSelect({
           {label} {required && <span className="text-red-600">*</span>}
         </label>
       )}
-      <select
+      <CustomDropdown
         id={selectId}
         name={name}
         value={value}
         disabled={disabled}
         onChange={onChange}
+        required={required}
+        options={options}
+        placeholder={placeholder}
+        className={`w-full ${selectClassName}`}
         aria-required={required ? 'true' : 'false'}
         aria-invalid={error ? 'true' : 'false'}
         aria-describedby={[error ? errorId : null, helper ? helperId : null].filter(Boolean).join(' ') || undefined}
-        className={`w-full px-2 py-1 border rounded app-select bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${error ? 'border-red-500' : 'border-gray-300'} ${disabled ? 'opacity-60 cursor-not-allowed' : ''} ${selectClassName}`}
         {...rest}
-      >
-        {placeholder && <option value="" disabled={required}>{placeholder}</option>}
-        {options.map((opt, idx) => {
-          if (typeof opt === 'string') return <option key={idx} value={opt}>{opt}</option>;
-          return <option key={idx} value={opt.value}>{opt.label}</option>;
-        })}
-      </select>
+      />
       {helper && !error && (
         <p id={helperId} className="text-xs text-gray-500">{helper}</p>
       )}
