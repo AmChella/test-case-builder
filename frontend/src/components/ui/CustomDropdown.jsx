@@ -83,7 +83,7 @@ export default function CustomDropdown({
   };
 
   return (
-    <div className={`relative ${className}`} {...rest}>
+  <div className={`relative z-30 ${className}`} {...rest}>
       <button
         type="button"
         ref={buttonRef}
@@ -100,7 +100,7 @@ export default function CustomDropdown({
       {open && (
         <div
           ref={menuRef}
-          className={`absolute left-0 mt-1 w-full z-50 bg-white border rounded shadow-lg ${dropdownClassName}`}
+          className={`absolute left-0 mt-1 w-full z-50 bg-white border rounded shadow-lg max-h-64 overflow-auto ${dropdownClassName}`}
           role="listbox"
         >
           {opts.map((opt, idx) => (

@@ -1,0 +1,100 @@
+{
+    "_id": "comprehensive-iterative-example",
+    "description": "Comprehensive Iterative Group Example - Multiple Steps per Element",
+    "enabled": true,
+    "product": "Demo",
+    "testOrder": 1,
+    "testSteps": [
+        {
+            "stepName": "Navigate to TodoMVC",
+            "action": "goto",
+            "path": "https://demo.playwright.dev/todomvc/#/",
+            "waitTime": 2000,
+            "validations": [
+                {
+                    "type": "toBeVisible",
+                    "selector": ".new-todo",
+                    "selectorType": "css",
+                    "message": "Input field should be visible"
+                }
+            ]
+        },
+        {
+            "stepName": "Add multiple todos",
+            "action": "custom",
+            "customName": "addMultipleTodos",
+            "data": [
+                "Learn Playwright",
+                "Write tests",
+                "Deploy app",
+                "Celebrate success"
+            ],
+            "waitTime": 1000
+        },
+        {
+            "stepName": "STEP 1: Hover over each todo item",
+            "action": "hover",
+            "selector": ".todo-list li",
+            "selectorType": "css",
+            "iterativeGroup": "process-each-todo",
+            "waitTime": 500,
+            "validations": [
+                {
+                    "type": "toBeVisible",
+                    "selector": ".todo-list li .view",
+                    "selectorType": "css",
+                    "message": "Todo item view should be visible on hover"
+                }
+            ]
+        },
+        {
+            "stepName": "STEP 2: Mark todo as completed",
+            "action": "click",
+            "selector": ".todo-list li input[type=\"checkbox\"]",
+            "selectorType": "css",
+            "iterativeGroup": "process-each-todo",
+            "waitTime": 1000,
+            "validations": [
+                {
+                    "type": "toHaveClass",
+                    "selector": ".todo-list li",
+                    "selectorType": "css",
+                    "data": "completed",
+                    "message": "Todo should have completed class after clicking checkbox"
+                }
+            ]
+        },
+        {
+            "stepName": "STEP 3: Verify strikethrough styling",
+            "action": "waitForTimeout",
+            "waitTime": 500,
+            "iterativeGroup": "process-each-todo",
+            "validations": [
+                {
+                    "type": "toHaveCSS",
+                    "selector": ".todo-list li.completed .view label",
+                    "selectorType": "css",
+                    "data": "line-through",
+                    "cssProperty": "text-decoration-line",
+                    "message": "Completed todo should have strikethrough text"
+                }
+            ]
+        },
+        {
+            "stepName": "Final verification - all todos completed",
+            "action": "waitForTimeout",
+            "waitTime": 1000,
+            "validations": [
+                {
+                    "type": "toHaveText",
+                    "selector": ".todo-count",
+                    "selectorType": "css",
+                    "data": "0 items left",
+                    "message": "All todos should be completed (0 items left)"
+                }
+            ]
+        }
+    ],
+    "createdAt": "2025-09-22T00:00:00.000Z",
+    "updatedAt": "2025-09-22T00:00:00.000Z"
+}

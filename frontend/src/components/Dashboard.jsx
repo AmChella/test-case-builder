@@ -5,6 +5,7 @@ import TestCaseForm from './TestCaseForm';
 import BatchCreate from './BatchCreate';
 import { useToast } from './ToastProvider';
 import { useLogger } from './LoggerProvider';
+import ConfirmDialog from './ui/ConfirmDialog';
 
 export default function Dashboard() {
   const [items, setItems] = useState([]);
@@ -29,6 +30,7 @@ export default function Dashboard() {
   const [newProductName, setNewProductName] = useState('');
   const [newProductDesc, setNewProductDesc] = useState('');
   const [savingProduct, setSavingProduct] = useState(false);
+  const [confirmState, setConfirmState] = useState({ open: false, type: null, payload: null });
 
   // Helpers: human-readable time formatting
   const formatTimestamp = (ts) => {
@@ -50,6 +52,40 @@ export default function Dashboard() {
 
   useEffect(() => { refreshProducts(); }, []);
   useEffect(() => { load(); }, [currentProduct]);
+  // Global drag events to show file drop overlay for JSON imports
+  useEffect(() => {
+    let dragCounter = 0;
+    const onEnter = (e) => {
+      if (e.dataTransfer?.types?.includes('Files')) {
+        dragCounter++;
+        setIsOverDropzone(true);
+      }
+    };
+    const onOver = (e) => {
+      if (isOverDropzone) e.preventDefault();
+    };
+    const onLeave = (e) => {
+      if (--dragCounter <= 0) {
+        dragCounter = 0;
+        setIsOverDropzone(false);
+      }
+    };
+    const onDrop = (e) => {
+      if (!isOverDropzone) return;
+      onDropImport(e);
+      dragCounter = 0;
+    };
+    window.addEventListener('dragenter', onEnter);
+    window.addEventListener('dragover', onOver);
+    window.addEventListener('dragleave', onLeave);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragenter', onEnter);
+      window.removeEventListener('dragover', onOver);
+      window.removeEventListener('dragleave', onLeave);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, [isOverDropzone]);
   const refreshProducts = async () => {
     try {
       const list = await fetchProducts();
@@ -128,14 +164,39 @@ export default function Dashboard() {
       const text = await file.text();
       const json = JSON.parse(text);
       const items = Array.isArray(json) ? json : [json];
-      const adjusted = items.map(p => ({ product: currentProduct !== 'All' ? (p.product || currentProduct) : (p.product || undefined), ...p }));
-  await createTestcases(adjusted);
+      // Auto-resolve: remove testOrder if it might conflict (we'll let backend assign)
+      const adjusted = items.map(p => {
+        const out = { product: currentProduct !== 'All' ? (p.product || currentProduct) : (p.product || undefined), ...p };
+        if (out.testOrder !== undefined && out.testOrder !== null && typeof out.testOrder !== 'number') delete out.testOrder;
+        // Strip server-managed fields
+        delete out._id; delete out.filename; delete out.createdAt; delete out.updatedAt;
+        return out;
+      });
+      try {
+        await createTestcases(adjusted);
+      } catch (err) {
+        // If duplicate order error, retry with testOrder removed
+        const dup = err?.response?.data?.error && err.response.data.error.toLowerCase().includes('duplicate testorder');
+        if (dup) {
+          const stripped = adjusted.map(o => { const c = { ...o }; delete c.testOrder; return c; });
+          await createTestcases(stripped);
+        } else {
+          throw err;
+        }
+      }
   await load();
   toast.success('Imported test case(s) successfully');
       logger.info('Import from file input', { count: Array.isArray(json) ? json.length : 1, name: file.name });
     } catch (err) {
       console.error(err);
-  toast.error('Import failed — ' + (err?.response?.data?.error || err.message));
+      const resp = err?.response?.data;
+      let detailMsg = '';
+      if (resp?.details) {
+        if (Array.isArray(resp.details)) detailMsg = ' Details: ' + resp.details.map(d => d.message || JSON.stringify(d)).join('; ');
+        else if (typeof resp.details === 'string') detailMsg = ' Details: ' + resp.details;
+        else detailMsg = ' Details: ' + JSON.stringify(resp.details);
+      }
+      toast.error('Import failed — ' + (resp?.error || err.message) + detailMsg);
       logger.error('Import failed (file input)', { error: err?.response?.data?.error || err.message });
     } finally {
       e.target.value = '';
@@ -155,14 +216,36 @@ export default function Dashboard() {
         return Array.isArray(parsed) ? parsed : [parsed];
       });
       // If a specific product is selected (not All), apply it to imported items that don't specify product
-      const adjusted = payload.map(p => ({ product: currentProduct !== 'All' ? (p.product || currentProduct) : (p.product || undefined), ...p }));
-  await createTestcases(adjusted);
+      const adjusted = payload.map(p => {
+        const out = { product: currentProduct !== 'All' ? (p.product || currentProduct) : (p.product || undefined), ...p };
+        if (out.testOrder !== undefined && out.testOrder !== null && typeof out.testOrder !== 'number') delete out.testOrder;
+        delete out._id; delete out.filename; delete out.createdAt; delete out.updatedAt;
+        return out;
+      });
+      try {
+        await createTestcases(adjusted);
+      } catch (err) {
+        const dup = err?.response?.data?.error && err.response.data.error.toLowerCase().includes('duplicate testorder');
+        if (dup) {
+          const stripped = adjusted.map(o => { const c = { ...o }; delete c.testOrder; return c; });
+          await createTestcases(stripped);
+        } else {
+          throw err;
+        }
+      }
   await load();
   toast.success('Imported test case(s) successfully');
       logger.info('Import via drop', { files: files.map(f => f.name), count: payload.length });
     } catch (err) {
       console.error(err);
-  toast.error('Import failed — ' + (err?.response?.data?.error || err.message));
+      const resp = err?.response?.data;
+      let detailMsg = '';
+      if (resp?.details) {
+        if (Array.isArray(resp.details)) detailMsg = ' Details: ' + resp.details.map(d => d.message || JSON.stringify(d)).join('; ');
+        else if (typeof resp.details === 'string') detailMsg = ' Details: ' + resp.details;
+        else detailMsg = ' Details: ' + JSON.stringify(resp.details);
+      }
+      toast.error('Import failed — ' + (resp?.error || err.message) + detailMsg);
       logger.error('Import failed (drop)', { error: err?.response?.data?.error || err.message });
     }
   };
@@ -178,48 +261,95 @@ export default function Dashboard() {
   const selectAll = () => setSelected(new Set(items.map(i => i.filename)));
   const clearSelection = () => setSelected(new Set());
 
-  // Bulk delete
-  const deleteSelected = async () => {
-    if (!selected.size) return;
-    if (!confirm(`Delete ${selected.size} selected item(s)?`)) return;
-  await Promise.all(Array.from(selected).map(fn => deleteTestcase(fn)));
-    clearSelection();
-  await load();
-  toast.success('Deleted selected test case(s)');
-    logger.info('Deleted selected', { count: selected.size });
-  };
-
-  // Duplicate actions
+  // Duplicate actions (restored)
   const duplicateOne = async (it) => {
     const { filename, ...content } = it;
-  await createTestcases({ ...content });
-  await load();
-  toast.success('Duplicated test case');
-    logger.info('Duplicated one', { source: filename });
+    try {
+      await createTestcases({ ...content });
+      await load();
+      toast.success('Duplicated test case');
+      logger.info('Duplicated one', { source: filename });
+    } catch (err) {
+      toast.error('Duplicate failed — ' + (err?.response?.data?.error || err.message));
+      logger.error('Duplicate one failed', { source: filename, error: err?.response?.data?.error || err.message });
+    }
   };
   const duplicateSelected = async () => {
     const toDup = items.filter(i => selected.has(i.filename)).map(({ filename, ...content }) => content);
     if (!toDup.length) return;
-  await createTestcases(toDup);
-    clearSelection();
-  await load();
-  toast.success('Duplicated selected test case(s)');
-    logger.info('Duplicated selected', { count: toDup.length });
+    try {
+      await createTestcases(toDup);
+      clearSelection();
+      await load();
+      toast.success('Duplicated selected test case(s)');
+      logger.info('Duplicated selected', { count: toDup.length });
+    } catch (err) {
+      toast.error('Duplicate selected failed — ' + (err?.response?.data?.error || err.message));
+      logger.error('Duplicate selected failed', { error: err?.response?.data?.error || err.message });
+    }
   };
 
-  // Drag-and-drop reordering within list
-  const onDragStart = (index) => setDragIndex(index);
-  const onDragOver = (e, overIndex) => {
-    e.preventDefault();
-    if (dragIndex === null || dragIndex === overIndex) return;
+  // Bulk delete
+  const deleteSelected = async () => {
+    if (!selected.size) return;
+    setConfirmState({ open: true, type: 'bulk-delete', payload: { count: selected.size } });
   };
-  const onDropReorder = async (e, overIndex) => {
-    e.preventDefault();
-    if (dragIndex === null || dragIndex === overIndex) return;
+  const performBulkDelete = async () => {
+    const size = selected.size;
+    if (!size) { setConfirmState({ open: false, type: null, payload: null }); return; }
+    try {
+      await Promise.all(Array.from(selected).map(fn => deleteTestcase(fn)));
+      clearSelection();
+      await load();
+      toast.success('Deleted selected test case(s)');
+      logger.info('Deleted selected', { count: size });
+    } catch (err) {
+      toast.error('Failed to delete selected — ' + (err?.response?.data?.error || err.message));
+      logger.error('Bulk delete failed', { error: err?.response?.data?.error || err.message });
+    } finally {
+      setConfirmState({ open: false, type: null, payload: null });
+    }
+  };
+  // Product delete replace inline confirm
+  const requestDeleteProduct = () => {
+    setConfirmState({ open: true, type: 'product-delete', payload: { name: currentProduct } });
+  };
+  const performDeleteProduct = async () => {
+    try {
+      await deleteProduct(currentProduct);
+      await refreshProducts();
+      setCurrentProduct('All');
+      toast.success('Product deleted');
+    } catch (err) {
+      toast.error('Failed to delete product — ' + (err?.response?.data?.error || err.message));
+    } finally {
+      setConfirmState({ open: false, type: null, payload: null });
+    }
+  };
+  // Single testcase delete
+  const requestDeleteSingle = (it) => {
+    setConfirmState({ open: true, type: 'single-delete', payload: { filename: it.filename, description: it.description } });
+  };
+  const performDeleteSingle = async () => {
+    const { filename, description } = confirmState.payload || {};
+    if (!filename) { setConfirmState({ open: false, type: null, payload: null }); return; }
+    try {
+      await deleteTestcase(filename);
+      await load();
+      toast.success('Deleted');
+      logger.info('Deleted one', { filename });
+      if (editing?.filename === filename) setEditing(null);
+    } catch (err) {
+      toast.error('Delete failed — ' + (err?.response?.data?.error || err.message));
+      logger.error('Delete failed', { filename, error: err?.response?.data?.error || err.message });
+    } finally {
+      setConfirmState({ open: false, type: null, payload: null });
+    }
+  };
+
+  // Helpers: reordering logic (drag-and-drop, etc.)
+  const reorderItems = async (next) => {
     const prevOrderByFile = new Map(items.map(it => [it.filename, it.testOrder]));
-    const next = [...items];
-    const [moved] = next.splice(dragIndex, 1);
-    next.splice(overIndex, 0, moved);
     // Reassign testOrder within each product group (1-based per product)
     const byProduct = new Map();
     next.forEach(it => { const p = it.product || 'General'; if (!byProduct.has(p)) byProduct.set(p, []); byProduct.get(p).push(it); });
@@ -228,7 +358,6 @@ export default function Dashboard() {
       arr.forEach((it, idx) => reassigned.push({ ...it, testOrder: idx + 1 }));
     }
     setItems(reassigned);
-    setDragIndex(null);
     // Persist only changed items
     try {
       setSavingOrder(true);
@@ -244,104 +373,159 @@ export default function Dashboard() {
       setSavingOrder(false);
     }
   };
+  // Drag-and-drop reordering within list
+  const onDragStart = (index) => setDragIndex(index);
+  const onDragOver = (e, overIndex) => {
+    e.preventDefault();
+    if (dragIndex === null || dragIndex === overIndex) return;
+  };
+  const onDropReorder = async (e, overIndex) => {
+    e.preventDefault();
+    if (dragIndex === null || dragIndex === overIndex) return;
+    const next = [...items];
+    const [moved] = next.splice(dragIndex, 1);
+    next.splice(overIndex, 0, moved);
+    await reorderItems(next);
+    setDragIndex(null);
+  };
 
   // Keyboard/mouse move helpers
   const moveItem = async (fromIndex, toIndex) => {
     if (toIndex < 0 || toIndex >= items.length || fromIndex === toIndex) return;
-    const prevOrderByFile = new Map(items.map(it => [it.filename, it.testOrder]));
     const next = [...items];
     const [moved] = next.splice(fromIndex, 1);
     next.splice(toIndex, 0, moved);
-    // Reassign testOrder within each product group (1-based per product)
-    const byProduct = new Map();
-    next.forEach(it => { const p = it.product || 'General'; if (!byProduct.has(p)) byProduct.set(p, []); byProduct.get(p).push(it); });
-    const reassigned = [];
-    for (const [p, arr] of byProduct.entries()) {
-      arr.forEach((it, idx) => reassigned.push({ ...it, testOrder: idx + 1 }));
-    }
-    setItems(reassigned);
-    try {
-      setSavingOrder(true);
-      const changed = reassigned.filter(it => prevOrderByFile.get(it.filename) !== it.testOrder);
-      await Promise.all(changed.map(it => updateTestcase(it.filename, { description: it.description, enabled: it.enabled, testSteps: it.testSteps, testOrder: it.testOrder })));
-      logger.info('Move saved', { changed: changed.length });
-    } catch (err) {
-      console.error(err);
-  toast.error('Failed to save order — ' + (err?.response?.data?.error || err.message));
-      logger.error('Move save failed', { error: err?.response?.data?.error || err.message });
-      await load();
-    } finally {
-      setSavingOrder(false);
-    }
+    await reorderItems(next);
   };
 
+  // Global hotkey: Ctrl+L toggles list visibility
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        setSidebarOpen(o => !o);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   return (
-  <div className="p-6 min-h-screen">
+    <div className="p-6 min-h-screen flex flex-col space-y-5">
+      {/* File drop overlay for importing JSON test cases */}
+      {isOverDropzone && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-indigo-600/80 text-white p-10 border-4 border-dashed border-white/70"
+          onDragOver={e => e.preventDefault()}
+          onDrop={onDropImport}
+        >
+          <span className="mi text-6xl mb-4 animate-pulse">upload_file</span>
+          <h2 className="text-2xl font-semibold mb-2">Drop JSON file(s) to import</h2>
+          <p className="text-sm opacity-90">You can drag one or many .json files containing test case definitions.</p>
+          <p className="text-xs mt-4 opacity-70">(Esc / click outside to cancel)</p>
+          <button
+            type="button"
+            className="mt-6 btn btn-muted"
+            onClick={() => setIsOverDropzone(false)}
+          >Cancel</button>
+        </div>
+      )}
       {/* Add Product Modal */}
       {showProductModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/30" onClick={() => !savingProduct && setShowProductModal(false)} aria-hidden></div>
-          <div role="dialog" aria-modal="true" className="relative bg-white border rounded shadow-lg w-full max-w-md p-4 z-10">
-            <div className="flex items-center mb-3">
-              <h3 className="text-lg font-semibold mr-auto">Add Product</h3>
-              <button className="icon-btn icon-muted" onClick={() => !savingProduct && setShowProductModal(false)} title="Close" aria-label="Close"><span className="mi">close</span></button>
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !savingProduct && setShowProductModal(false)} />
+          <div className="relative z-10 w-full max-w-md rounded-lg border bg-white dark:bg-slate-800 shadow-lg">
+            <div className="px-5 py-4 border-b flex items-center">
+              <h2 className="text-lg font-semibold mr-auto">Add Product</h2>
+              <button className="icon-btn icon-muted" onClick={() => !savingProduct && setShowProductModal(false)} aria-label="Close" title="Close"><span className="mi">close</span></button>
             </div>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Name <span className="text-red-500">*</span></label>
-                <input
-                  autoFocus
-                  value={newProductName}
-                  onChange={(e) => setNewProductName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); /* submit */ (async () => { if (!savingProduct) await (async () => { if (!newProductName.trim()) { toast.error('Product name is required'); return; } try { setSavingProduct(true); await createProduct({ name: newProductName.trim(), description: newProductDesc.trim() || undefined }); await refreshProducts(); setCurrentProduct(newProductName.trim()); setShowProductModal(false); toast.success('Product created'); } catch (err) { toast.error('Failed to create product — ' + (err?.response?.data?.error || err.message)); } finally { setSavingProduct(false); } })(); })(); } }}
-                  placeholder="e.g. WebApp, Mobile, API"
-                  className="w-full px-3 py-2 border rounded bg-white"
-                />
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const name = newProductName.trim();
+              if (!name) { toast.error('Name required'); return; }
+              try {
+                setSavingProduct(true);
+                await createProduct({ name, description: newProductDesc });
+                toast.success('Product saved');
+                logger.info('Product created', { name });
+                await refreshProducts();
+                setCurrentProduct(name);
+                setShowProductModal(false);
+              } catch (err) {
+                toast.error('Failed to save product — ' + (err?.response?.data?.error || err.message));
+                logger.error('Product create failed', { error: err?.response?.data?.error || err.message });
+              } finally {
+                setSavingProduct(false);
+              }
+            }}>
+              <div className="p-5 space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold tracking-wide text-gray-600 dark:text-slate-300 mb-1">NAME</label>
+                  <input
+                    autoFocus
+                    className="field w-full"
+                    placeholder="e.g. Onboarding"
+                    value={newProductName}
+                    onChange={e => setNewProductName(e.target.value)}
+                    maxLength={60}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold tracking-wide text-gray-600 dark:text-slate-300 mb-1">DESCRIPTION (OPTIONAL)</label>
+                  <textarea
+                    className="field w-full min-h-[80px] resize-y"
+                    placeholder="Short description"
+                    value={newProductDesc}
+                    onChange={e => setNewProductDesc(e.target.value)}
+                    maxLength={300}
+                  />
+                  <div className="text-[10px] text-gray-500 mt-1">{newProductDesc.length}/300</div>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Description</label>
-                <textarea
-                  value={newProductDesc}
-                  onChange={(e) => setNewProductDesc(e.target.value)}
-                  placeholder="Optional details about this product"
-                  className="w-full px-3 py-2 border rounded bg-white min-h-[80px]"
-                />
+              <div className="px-5 py-3 border-t flex items-center gap-2 justify-end bg-gray-50 dark:bg-slate-700/30 rounded-b-lg">
+                <button type="button" className="btn btn-muted" disabled={savingProduct} onClick={() => setShowProductModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary disabled:opacity-50" disabled={savingProduct}>
+                  {savingProduct ? 'Saving…' : 'Save'}
+                </button>
               </div>
-            </div>
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button className="btn btn-secondary" onClick={() => setShowProductModal(false)} disabled={savingProduct}>Cancel</button>
-              <button
-                className="btn btn-primary disabled:opacity-50"
-                disabled={savingProduct || !newProductName.trim()}
-                onClick={async () => {
-                  if (!newProductName.trim()) { toast.error('Product name is required'); return; }
-                  try {
-                    setSavingProduct(true);
-                    await createProduct({ name: newProductName.trim(), description: newProductDesc.trim() || undefined });
-                    await refreshProducts();
-                    setCurrentProduct(newProductName.trim());
-                    setShowProductModal(false);
-                    toast.success('Product created');
-                  } catch (err) {
-                    toast.error('Failed to create product — ' + (err?.response?.data?.error || err.message));
-                  } finally {
-                    setSavingProduct(false);
-                  }
-                }}
-              >
-                {savingProduct ? 'Creating…' : 'Create'}
-              </button>
-            </div>
+            </form>
           </div>
         </div>
       )}
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        open={confirmState.open}
+        title={confirmState.type === 'bulk-delete' ? 'Delete Selected Test Cases' : confirmState.type === 'product-delete' ? 'Delete Product' : confirmState.type === 'single-delete' ? 'Delete Test Case' : ''}
+        message={(
+          <> {confirmState.type === 'bulk-delete' && (
+              <>Are you sure you want to delete <strong>{confirmState.payload?.count}</strong> selected test case(s)? This action cannot be undone.</>
+            )}
+            {confirmState.type === 'product-delete' && (
+              <>Delete product <strong>{confirmState.payload?.name}</strong>? This will NOT delete its test cases; they will move to General.</>
+            )}
+            {confirmState.type === 'single-delete' && (
+              <>Delete test case <strong>{confirmState.payload?.description || confirmState.payload?.filename}</strong>? This cannot be undone.</>
+            )}
+          </>
+        )}
+        variant={confirmState.type?.includes('delete') ? 'danger' : 'default'}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onCancel={() => setConfirmState({ open: false, type: null, payload: null })}
+        onConfirm={() => {
+          if (confirmState.type === 'bulk-delete') return performBulkDelete();
+          if (confirmState.type === 'product-delete') return performDeleteProduct();
+          if (confirmState.type === 'single-delete') return performDeleteSingle();
+        }}
+      />
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Test Cases</h1>
-          <p className="text-sm text-gray-500">Create, import, export, and order your test cases</p>
+      <div className="flex items-start flex-wrap gap-4">
+        {/* Header left */}
+        <div className="mr-auto space-y-1">
+          <h1 className="text-2xl font-bold tracking-tight">Test Cases</h1>
+          <p className="text-sm text-gray-500">Create, import, export, order & run automated scenarios</p>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex items-center gap-2">
           {/* Product selector */}
           <div className="flex items-center gap-2">
             <div className="min-w-[160px]">
@@ -355,15 +539,7 @@ export default function Dashboard() {
             </div>
             <button className="icon-btn icon-primary" title="Add product" aria-label="Add product" onClick={() => { setNewProductName(''); setNewProductDesc(''); setShowProductModal(true); }}><span className="mi">library_add</span></button>
             {currentProduct !== 'All' && currentProduct !== 'General' && (
-              <button className="icon-btn icon-danger" title="Delete product" aria-label="Delete product" onClick={async () => {
-                if (!confirm(`Delete product "${currentProduct}"? This does not delete test cases.`)) return;
-                try {
-                  await deleteProduct(currentProduct);
-                  await refreshProducts();
-                  setCurrentProduct('All');
-                  toast.success('Product deleted');
-                } catch (err) { toast.error('Failed to delete product — ' + (err?.response?.data?.error || err.message)); }
-              }}><span className="mi">delete</span></button>
+              <button className="icon-btn icon-danger" title="Delete product" aria-label="Delete product" onClick={requestDeleteProduct}><span className="mi">delete</span></button>
             )}
           </div>
           <div className="rounded border overflow-hidden" role="tablist" aria-label="Mode">
@@ -371,194 +547,101 @@ export default function Dashboard() {
             <button className={`icon-btn icon-muted ${mode === 'batch' ? 'icon-indigo' : ''}`} onClick={() => setMode('batch')} title="Batch create" aria-label="Batch mode"><span className="mi">view_module</span></button>
           </div>
           <button className="icon-btn icon-add" onClick={() => setEditing(null)} title="New test case" aria-label="New"><span className="mi">add</span></button>
+          <button className={`icon-btn ${logger.debugEnabled ? 'icon-success' : 'icon-muted'}`} onClick={() => { logger.toggleDebug(); logger.info(`Debug ${logger.debugEnabled ? 'disabled' : 'enabled'}`); }} title={logger.debugEnabled ? 'Disable debug logging' : 'Enable debug logging'} aria-label="Toggle debug mode"><span className="mi">bug_report</span></button>
           <button className="icon-btn icon-warning" onClick={onPickImport} title="Import JSON" aria-label="Import"><span className="mi">upload</span></button>
           <button className="icon-btn icon-success" onClick={exportAll} title="Export all" aria-label="Export all"><span className="mi">download</span></button>
           <input ref={fileRef} className="hidden" type="file" accept="application/json,.json" onChange={onImportFiles} />
+          <button
+            className="icon-btn icon-muted"
+            onClick={() => setSidebarOpen(o => !o)}
+            title={sidebarOpen ? 'Hide list (Ctrl+L)' : 'Show list (Ctrl+L)'}
+            aria-label={sidebarOpen ? 'Hide list' : 'Show list'}
+          >
+            <span className="mi">{sidebarOpen ? 'menu_open' : 'menu'}</span>
+          </button>
         </div>
       </div>
 
-      {/* Toolbar */}
-      <div className="mt-4 flex items-center gap-3">
-        <div className="flex-1">
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Search by description or order..."
-            className="w-full px-3 py-2 border rounded bg-white"
-          />
-        </div>
-        <label className="text-sm text-gray-700 flex items-center gap-2">
-          <input type="checkbox" checked={showEnabledOnly} onChange={e => setShowEnabledOnly(e.target.checked)} /> Enabled only
-        </label>
-        {savingOrder && <span className="text-sm text-gray-500">Saving order…</span>}
-      </div>
-
-      {/* Dropzone for import */}
-      <div
-        className={`mt-4 p-4 border-2 border-dashed rounded bg-white ${isOverDropzone ? 'bg-gray-100' : ''}`}
-        onDragOver={(e) => { e.preventDefault(); setIsOverDropzone(true); }}
-        onDragLeave={() => setIsOverDropzone(false)}
-        onDrop={onDropImport}
-        aria-label="Drop JSON files here to import"
-      >
-        <span className="text-sm text-gray-600">Drag and drop JSON file(s) here to import</span>
-      </div>
-
-      {/* Content */}
-  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* List column */}
+      {/* Main split area */}
+      <div className="flex-1 flex gap-5 min-h-0">
         {sidebarOpen && (
-        <div className="md:col-span-1">
-          {/* Bulk bar */}
-          <div className="flex items-center gap-2 mb-2">
-            <button
-              className="icon-btn icon-muted"
-              onClick={() => setSidebarOpen(false)}
-              title="Hide test list"
-              aria-label="Hide test list"
-            >
-              <span className="mi">chevron_left</span>
-            </button>
-            <button className="icon-btn icon-muted" onClick={selectAll} title="Select all" aria-label="Select all"><span className="mi">select_check_box</span></button>
-            <button className="icon-btn icon-muted" onClick={clearSelection} title="Clear selection" aria-label="Clear selection"><span className="mi">clear_all</span></button>
-            <button className="icon-btn icon-danger disabled:opacity-50" onClick={deleteSelected} disabled={!selected.size} title="Delete selected" aria-label="Delete selected"><span className="mi">delete</span></button>
-            <button className="icon-btn icon-primary disabled:opacity-50" onClick={duplicateSelected} disabled={!selected.size} title="Duplicate selected" aria-label="Duplicate selected"><span className="mi">content_copy</span></button>
-          </div>
-          <div className="bg-white border rounded divide-y">
-            {groupedByProduct.length === 0 && (
-              <div className="p-4 text-sm text-gray-500">No test cases match your search.</div>
-            )}
-            {groupedByProduct.map(([prodName, group]) => (
-              <React.Fragment key={`group-${prodName}`}>
-                <div className="px-3 py-2 bg-gray-50 text-xs font-medium text-gray-600 flex items-center justify-between">
-                  <span>{prodName}</span>
-                  <span className="text-gray-400">{group.length}</span>
+          <aside className="w-full md:w-1/3 xl:w-1/4 flex flex-col gap-3" id="test-list-panel" aria-label="Test cases list" aria-expanded={sidebarOpen}>
+            <div className="bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-600 rounded p-3 space-y-3 shadow-sm">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search description or order..." className="field w-full" />
                 </div>
-                {group.map((it) => {
-                  const originalIndex = items.findIndex(x => x.filename === it.filename);
-                  const isActive = editing?.filename === it.filename;
-                  return (
-                    <div
-                      key={it.filename}
-                      className={`p-3 flex items-start gap-3 cursor-pointer ${isActive ? 'bg-blue-50' : ''}`}
-                      draggable
-                      onDragStart={() => onDragStart(originalIndex)}
-                      onDragOver={(e) => onDragOver(e, originalIndex)}
-                      onDrop={(e) => onDropReorder(e, originalIndex)}
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); moveItem(originalIndex, originalIndex - 1); }
-                        if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); moveItem(originalIndex, originalIndex + 1); }
-                      }}
-                      onClick={() => openForEdit(it)}
-                    >
-                      <input type="checkbox" className="mt-1" checked={selected.has(it.filename)} onChange={(e) => { e.stopPropagation(); toggleSelect(it.filename); }} title="Select" aria-label="Select" />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs inline-block px-1.5 py-0.5 rounded bg-gray-100 border">#{it.testOrder}</span>
-                          <span className={`toggle-btn ${it.enabled ? 'toggle-on' : 'toggle-off'}`} aria-label="Enabled state" title={it.enabled ? 'Enabled' : 'Disabled'}>
-                            <span className="mi">{it.enabled ? 'toggle_on' : 'toggle_off'}</span>
-                          </span>
-                        </div>
-                        <div className="font-medium truncate">{it.description}</div>
-                        <div className="text-xs text-gray-500">Product: {it.product || 'General'}</div>
-                        <div className="mt-1 flex gap-2 text-sm text-gray-700 items-center">
-                          <button
-                            className="icon-btn icon-danger disabled:opacity-50"
-                            title="Run this test"
-                            aria-label="Run test"
-                            disabled={running === it.filename}
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              setRunResult(null);
-                              setRunning(it.filename);
-                              toast.info(`Running: ${it.description || it.filename}`);
-                              logger.info('Run started', { filename: it.filename, description: it.description });
-                              try {
-                                const { filename, ...scenario } = it;
-                                const res = await runTest({ scenarios: [scenario], headless: true });
-                                // Normalize possible response shapes
-                                let report = null;
-                                if (Array.isArray(res)) report = res[0];
-                                else if (Array.isArray(res?.reports)) report = res.reports[0];
-                                else if (Array.isArray(res?.results)) report = res.results[0];
-                                else if (Array.isArray(res?.scenarios)) report = res.scenarios[0];
-                                else if (res?.report) report = res.report;
-                                else if (res?.result) report = res.result;
-                                else if (res?.data?.report) report = res.data.report;
-                                else if (res?.title || res?.steps || res?.status || res?.location) report = res;
-
-                                // Structured report handling
-                                if (report && Array.isArray(report.steps)) {
-                                  const allPassed = ((report.status || '').toLowerCase() === 'passed') || report.steps.every(s => s.status === 'passed');
-                                  // Convert string timestamps to numbers for duration rendering
-                                  const startTime = typeof report.startTime === 'string' ? Date.parse(report.startTime) : report.startTime;
-                                  const endTime = typeof report.endTime === 'string' ? Date.parse(report.endTime) : report.endTime;
-                                  const steps = report.steps.map(s => ({
-                                    ...s,
-                                    startTime: typeof s.startTime === 'string' ? Date.parse(s.startTime) : s.startTime,
-                                    endTime: typeof s.endTime === 'string' ? Date.parse(s.endTime) : s.endTime,
-                                  }));
-                                  setRunResult({ ok: allPassed, for: it.filename, ...report, startTime, endTime, steps });
-                                  if (allPassed) {
-                                    toast.success('Test run finished successfully');
-                                    logger.info('Run succeeded', { filename: it.filename, steps: steps.length, passed: steps.filter(s => s.status === 'passed').length, durationMs: (endTime && startTime) ? (endTime - startTime) : undefined });
-                                  } else {
-                                    toast.error('Test run failed — see error panel');
-                                    logger.warn('Run failed', { filename: it.filename, steps: steps.length, failed: steps.filter(s => s.status !== 'passed').length, status: report.status });
-                                  }
-                                } else {
-                                  // Fallback to CLI-like output
-                                  const code = report?.code ?? res?.code;
-                                  const stdout = report?.stdout ?? res?.stdout ?? report?.output ?? res?.output ?? report?.logs ?? res?.logs ?? '';
-                                  const stderr = report?.stderr ?? res?.stderr ?? report?.error ?? res?.error ?? '';
-                                  const ok = code !== undefined ? Number(code) === 0 : false;
-                                  setRunResult({ ok, code, stdout, stderr, for: it.filename });
-                                  if (ok) {
-                                    toast.success('Test run finished successfully');
-                                    logger.info('Run succeeded (CLI mode)', { filename: it.filename, code, stdoutLen: String(stdout || '').length, stderrLen: String(stderr || '').length });
-                                  } else {
-                                    toast.error('Test run failed — see error panel');
-                                    logger.warn('Run failed (CLI mode)', { filename: it.filename, code, stderrSnippet: String(stderr || '').slice(0, 200) });
-                                  }
-                                }
-                              } catch (err) {
-                                const msg = err?.response?.data?.error || err.message || 'Unknown error';
-                                setRunResult({ ok: false, code: undefined, stdout: '', stderr: msg, for: it.filename });
-                                toast.error('Test run failed — see error panel');
-                                logger.error('Run error', { filename: it.filename, error: msg });
-                              } finally {
-                                setRunning(null);
-                                logger.debug('Run finished', { filename: it.filename });
-                              }
-                            }}
-                          >
-                            {running === it.filename ? (
-                              <span className="spinner" aria-hidden />
-                            ) : (
-                              <span className="mi">play_arrow</span>
-                            )}
-                          </button>
-                          <span className={`toggle-btn ${it.enabled ? 'toggle-on' : 'toggle-off'}`} title={it.enabled ? 'Enabled' : 'Disabled'} aria-label="Enabled state"><span className="mi">{it.enabled ? 'toggle_on' : 'toggle_off'}</span></span>
-                          <button className="icon-btn icon-muted" title="Edit" aria-label="Edit" onClick={(e) => { e.stopPropagation(); openForEdit(it); }}><span className="mi">edit</span></button>
-                          <button className="icon-btn icon-success" title="Export" aria-label="Export" onClick={(e) => { e.stopPropagation(); exportOne(it); }}><span className="mi">download</span></button>
-                          <button className="icon-btn icon-primary" title="Duplicate" aria-label="Duplicate" onClick={(e) => { e.stopPropagation(); duplicateOne(it); }}><span className="mi">content_copy</span></button>
-                          <button className="icon-btn icon-danger" title="Delete" aria-label="Delete" onClick={async (e) => { e.stopPropagation(); try { await deleteTestcase(it.filename); await load(); toast.success('Deleted'); logger.info('Deleted one', { filename: it.filename }); } catch (err) { toast.error('Delete failed — ' + (err?.response?.data?.error || err.message)); logger.error('Delete failed', { filename: it.filename, error: err?.response?.data?.error || err.message }); } }}><span className="mi">delete</span></button>
+                <label className="text-[10px] font-medium text-gray-600 flex items-center gap-1 whitespace-nowrap">
+                  <input type="checkbox" className="scale-110" checked={showEnabledOnly} onChange={e => setShowEnabledOnly(e.target.checked)} /> EN
+                </label>
+              </div>
+              {savingOrder && <div className="text-xs text-gray-500">Saving order…</div>}
+              <div className="flex items-center gap-2">
+                <button className="icon-btn icon-muted" onClick={selectAll} title="Select all" aria-label="Select all"><span className="mi">select_check_box</span></button>
+                <button className="icon-btn icon-muted" onClick={clearSelection} title="Clear selection" aria-label="Clear selection"><span className="mi">clear_all</span></button>
+                <button className="icon-btn icon-primary disabled:opacity-50" onClick={duplicateSelected} disabled={!selected.size} title="Duplicate selected" aria-label="Duplicate selected"><span className="mi">content_copy</span></button>
+                <button className="icon-btn icon-danger disabled:opacity-50" onClick={deleteSelected} disabled={!selected.size} title="Delete selected" aria-label="Delete selected"><span className="mi">delete</span></button>
+              </div>
+            </div>
+            {/* Scrollable list panel (allow vertical scroll, prevent last item stretch) */}
+            <div className="panel divide-y overflow-auto flex-1 min-h-0">
+              {groupedByProduct.length === 0 && (
+                <div className="p-4 text-sm text-gray-500">No test cases match your search.</div>
+              )}
+              {groupedByProduct.map(([prodName, group]) => (
+                <React.Fragment key={`group-${prodName}`}>
+                  <div className="px-3 py-2 bg-slate-50 dark:bg-slate-700/40 text-[11px] font-semibold tracking-wide uppercase text-slate-500 dark:text-slate-300 flex items-center justify-between">
+                    <span>{prodName}</span>
+                    <span className="text-slate-400">{group.length}</span>
+                  </div>
+                  {group.map(it => {
+                    const originalIndex = items.findIndex(x => x.filename === it.filename);
+                    const isActive = editing?.filename === it.filename;
+                    return (
+                      <div
+                        key={it.filename}
+                        className={`px-3 py-2 flex items-start gap-3 cursor-pointer group transition-colors text-sm relative ${isActive ? 'bg-indigo-50 dark:bg-indigo-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
+                        draggable
+                        onDragStart={() => onDragStart(originalIndex)}
+                        onDragOver={e => onDragOver(e, originalIndex)}
+                        onDrop={e => onDropReorder(e, originalIndex)}
+                        tabIndex={0}
+                        onKeyDown={e => {
+                          if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); moveItem(originalIndex, originalIndex - 1); }
+                          if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); moveItem(originalIndex, originalIndex + 1); }
+                        }}
+                        onClick={() => openForEdit(it)}
+                      >
+                        <span className="icon-btn icon-muted icon-btn-sm cursor-grab select-none -ml-1" aria-hidden><span className="mi">drag_indicator</span></span>
+                        <input type="checkbox" className="mt-1" checked={selected.has(it.filename)} onChange={e => { e.stopPropagation(); toggleSelect(it.filename); }} title="Select" aria-label="Select" />
+                        <div className="flex-1 min-w-0 space-y-0.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="badge badge-outline">#{it.testOrder}</span>
+                            <span className={`toggle-btn ${it.enabled ? 'toggle-on' : 'toggle-off'}`} aria-label="Enabled state" title={it.enabled ? 'Enabled' : 'Disabled'}><span className="mi">{it.enabled ? 'toggle_on' : 'toggle_off'}</span></span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-gradient-to-r from-indigo-500/10 to-emerald-500/10 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 uppercase tracking-wide">{it.product || 'General'}</span>
+                          </div>
+                          <div className="font-medium truncate leading-tight">{it.description}</div>
+                          <div className="flex gap-1.5 items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button className="icon-btn icon-danger disabled:opacity-50 icon-btn-sm" title="Run this test" aria-label="Run test" disabled={running === it.filename} onClick={async e => { e.stopPropagation(); setRunResult(null); setRunning(it.filename); toast.info(`Running: ${it.description || it.filename}`); logger.info('Run started', { filename: it.filename, description: it.description }); try { const { filename, ...scenario } = it; const res = await runTest({ scenarios: [scenario], headless: true }); let report = null; if (Array.isArray(res)) report = res[0]; else if (Array.isArray(res?.reports)) report = res.reports[0]; else if (Array.isArray(res?.results)) report = res.results[0]; else if (Array.isArray(res?.scenarios)) report.scenarios[0]; else if (res?.report) report = res.report; else if (res?.result) report = res.result; else if (res?.data?.report) report = res.data.report; else if (res?.title || res?.steps || res?.status || res?.location) report = res; if (report && Array.isArray(report.steps)) { const allPassed = ((report.status || '').toLowerCase() === 'passed') || report.steps.every(s => s.status === 'passed'); const startTime = typeof report.startTime === 'string' ? Date.parse(report.startTime) : report.startTime; const endTime = typeof report.endTime === 'string' ? Date.parse(report.endTime) : report.endTime; const steps = report.steps.map(s => ({ ...s, startTime: typeof s.startTime === 'string' ? Date.parse(s.startTime) : s.startTime, endTime: typeof s.endTime === 'string' ? Date.parse(s.endTime) : s.endTime })); setRunResult({ ok: allPassed, for: it.filename, ...report, startTime, endTime, steps }); if (allPassed) { toast.success('Test run finished successfully'); logger.info('Run succeeded', { filename: it.filename, steps: steps.length, passed: steps.filter(s => s.status === 'passed').length, durationMs: (endTime && startTime) ? (endTime - startTime) : undefined }); } else { toast.error('Test run failed — see error panel'); logger.warn('Run failed', { filename: it.filename, steps: steps.length, failed: steps.filter(s => s.status !== 'passed').length, status: report.status }); } } else { const code = report?.code ?? res?.code; const stdout = report?.stdout ?? res?.stdout ?? report?.output ?? res?.output ?? report?.logs ?? res?.logs ?? ''; const stderr = report?.stderr ?? res?.stderr ?? report?.error ?? res?.error ?? ''; const ok = code !== undefined ? Number(code) === 0 : false; setRunResult({ ok, code, stdout, stderr, for: it.filename }); if (ok) { toast.success('Test run finished successfully'); logger.info('Run succeeded (CLI mode)', { filename: it.filename, code, stdoutLen: String(stdout || '').length, stderrLen: String(stderr || '').length }); } else { toast.error('Test run failed — see error panel'); logger.warn('Run failed (CLI mode)', { filename: it.filename, code, stderrSnippet: String(stderr || '').slice(0, 200) }); } } } catch (err) { const msg = err?.response?.data?.error || err.message || 'Unknown error'; setRunResult({ ok: false, code: undefined, stdout: '', stderr: msg, for: it.filename }); toast.error('Test run failed — see error panel'); logger.error('Run error', { filename: it.filename, error: msg }); } finally { setRunning(null); logger.debug('Run finished', { filename: it.filename }); } }}>
+                              {running === it.filename ? <span className="spinner" aria-hidden /> : <span className="mi">play_arrow</span>}
+                            </button>
+                            <span className={`toggle-btn ${it.enabled ? 'toggle-on' : 'toggle-off'}`} title={it.enabled ? 'Enabled' : 'Disabled'} aria-label="Enabled state"><span className="mi">{it.enabled ? 'toggle_on' : 'toggle_off'}</span></span>
+                            <button className="icon-btn icon-muted icon-btn-sm" title="Edit" aria-label="Edit" onClick={e => { e.stopPropagation(); openForEdit(it); }}><span className="mi">edit</span></button>
+                            <button className="icon-btn icon-success icon-btn-sm" title="Export" aria-label="Export" onClick={e => { e.stopPropagation(); exportOne(it); }}><span className="mi">download</span></button>
+                            <button className="icon-btn icon-primary icon-btn-sm" title="Duplicate" aria-label="Duplicate" onClick={e => { e.stopPropagation(); duplicateOne(it); }}><span className="mi">content_copy</span></button>
+                            <button className="icon-btn icon-danger icon-btn-sm" title="Delete" aria-label="Delete" onClick={e => { e.stopPropagation(); requestDeleteSingle(it); }}><span className="mi">delete</span></button>
+                          </div>
                         </div>
                       </div>
-                      <span className="icon-btn icon-muted cursor-grab select-none" title="Drag to reorder" aria-label="Drag handle"><span className="mi">drag_indicator</span></span>
-                    </div>
-                  );
-                })}
-              </React.Fragment>
-            ))}
+                    );
+                  })}
+                </React.Fragment>
+              ))}
           </div>
-  </div>
+        </aside>
         )}
-
-        {/* Editor column */}
-        <div className={sidebarOpen ? "md:col-span-2 form-select-fix" : "md:col-span-3 relative form-select-fix"}>
-          <div className="bg-white border rounded p-4">
+        <section className={`${sidebarOpen ? 'flex-1' : 'flex-1'} min-w-0`}>
+          <div className="panel p-4">
             {runResult && (
               <div className={`mb-4 border rounded ${runResult.ok ? 'border-emerald-300 bg-emerald-50' : 'border-red-300 bg-red-50'}`}>
                 <div className="px-3 py-2 flex items-center gap-2">
@@ -665,17 +748,20 @@ export default function Dashboard() {
               </>
             )}
           </div>
+          {/* Fixed toggle handle when list hidden */}
           {!sidebarOpen && (
             <button
-              className="icon-btn icon-muted absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2"
-              title="Show test list"
+              className="icon-btn icon-muted fixed z-30 left-2 top-32 shadow-md bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-slate-300 dark:border-slate-600"
+              title="Show test list (Ctrl+L)"
               aria-label="Show test list"
+              aria-controls="test-list-panel"
+              aria-expanded={sidebarOpen}
               onClick={() => setSidebarOpen(true)}
             >
               <span className="mi">chevron_right</span>
             </button>
           )}
-        </div>
+        </section>
       </div>
     </div>
   );

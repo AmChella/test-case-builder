@@ -34,6 +34,7 @@ This tool provides a user-friendly interface to:
 - **Drag & Drop Reordering**: Visual test case ordering with persistent `testOrder`
 - **Keyboard Shortcuts**: Alt+↑/Alt+↓ for quick reordering
 - **Search & Filter**: Find tests by description, order, or enabled status
+- **Iterative Grouping**: Tag related steps with an `iterativeGroup` name to visually cluster them and prepare for grouped iterative execution logic
 
 ### Import/Export
 - **Drag & Drop Import**: Drop JSON files directly into the interface
@@ -195,6 +196,15 @@ The preview server runs on `http://localhost:4173` by default.
 | `waitForTimeout` | `waitTime` | Wait for specified milliseconds |
 | `custom` | `customName` | Execute custom test logic |
 
+### Iterative Grouping
+
+Use the optional `iterativeGroup` string on any step to associate multiple consecutive (or non-consecutive) steps into a logical group. In the UI:
+- Steps sharing the same `iterativeGroup` are color-accented.
+- A group badge appears in the step summary.
+- The field is optional; leave it blank for ungrouped steps.
+
+Planned (future) runtime behavior (not yet implemented): engine can iterate over matched elements once per group rather than per individual step, ensuring grouped actions execute in sequence for each element.
+
 ### Validation Types
 
 | Type | Required Fields | Description |
@@ -314,6 +324,7 @@ All endpoints return appropriate HTTP status codes with error details:
       "data": "any (conditional)",
       "waitTime": "number (conditional)",
       "iterate": "boolean (default: false)",
+  "iterativeGroup": "string (optional, groups related steps)",
       "customName": "string (conditional)",
       "soft": "boolean (default: false)",
       "validations": [
@@ -369,6 +380,7 @@ Example test case structure (see `frontend/samples/test-cases.json`):
       "stepName": "Accepting All Cookies",
       "action": "click",
       "selector": ".space-x-3>button:nth-child(3)",
+      "iterativeGroup": "cookie-flow",
       "soft": true,
       "validations": [
         {
@@ -402,6 +414,8 @@ Example test case structure (see `frontend/samples/test-cases.json`):
 - Validate JSON syntax using a JSON validator
 - Check that all required fields are present
 - Review validation error details in the UI
+- If failures mention validation, inspect step requirements (e.g., missing selector) or remove conflicting `testOrder` values
+- If importing samples containing `_id`, `createdAt`, `updatedAt`, or existing `filename`, the server now strips these automatically
 
 **Styling issues:**
 - Ensure Tailwind CSS is properly configured

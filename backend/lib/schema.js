@@ -19,6 +19,7 @@ const schema = {
       selector: { type: 'string' },
       selectorType: { type: 'string', enum: ['css', 'xpath', 'id', 'text', 'testId'] },
       data: {},
+          iterativeGroup: { type: 'string' },
           waitTime: { type: 'number' },
             iterate: { type: 'boolean' },
             customName: { type: 'string' },

@@ -9,7 +9,7 @@ const levelColors = {
 };
 
 export default function LogConsole() {
-  const { logs, open, setOpen, clear, export: exportLogs } = useLogger();
+  const { logs, open, setOpen, clear, export: exportLogs, debugEnabled, toggleDebug } = useLogger();
   const [filter, setFilter] = useState('all');
   const [q, setQ] = useState('');
 
@@ -31,6 +31,9 @@ export default function LogConsole() {
           <div className="px-3 py-2 border-b flex items-center gap-2">
             <span className="mi">terminal</span>
             <strong className="mr-auto">TCB Logs</strong>
+            <button className={`icon-btn ${debugEnabled ? 'icon-success' : 'icon-muted'}`} title={debugEnabled ? 'Disable debug logging' : 'Enable debug logging'} aria-label="Toggle debug mode" onClick={toggleDebug}>
+              <span className="mi">bug_report</span>
+            </button>
             <select className="border rounded px-2 py-1 text-sm" value={filter} onChange={e => setFilter(e.target.value)}>
               <option value="all">All</option>
               <option value="info">Info</option>
@@ -52,7 +55,7 @@ export default function LogConsole() {
                 <span className="text-xs text-gray-500 mr-2">{fmtTime(l.time)}</span>
                 <span className="uppercase text-xs font-semibold mr-2">{l.level}</span>
                 <span>{l.message}</span>
-                {l.meta && (
+                {l.meta && (debugEnabled || l.level === 'error') && (
                   <details className="mt-1">
                     <summary className="text-xs text-gray-600 cursor-pointer">Details</summary>
                     <pre className="text-xs overflow-auto bg-gray-50 border rounded p-2"><code>{JSON.stringify(l.meta, null, 2)}</code></pre>
